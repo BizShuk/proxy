@@ -122,6 +122,31 @@ func TestDecodeUpstreamError(t *testing.T) {
 	assert.Equal(t, "quota", err.Code)
 }
 
+func TestDecodeUpstreamErrorMapsRedirectsToBadGateway(t *testing.T) {
+	for _, status := range []int{
+		http.StatusMovedPermanently,
+		http.StatusFound,
+		http.StatusTemporaryRedirect,
+		http.StatusPermanentRedirect,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			err := DecodeUpstreamError(status, http.Header{
+				"Location":     {"https://redirected.example.com"},
+				"x-request-id": {"req_redirect"},
+			}, []byte(`{"error":{"message":"moved","code":"redirect"}}`))
+
+			assert.Equal(t, protocol.ERROR_UPSTREAM, err.Kind)
+			assert.Equal(t, http.StatusBadGateway, err.StatusCode())
+			assert.Equal(t, "upstream_error", err.Code)
+			assert.Equal(t, "upstream request failed", err.Message)
+			assert.Equal(t, "req_redirect", err.UpstreamRequestID)
+		})
+	}
+
+	rateLimit := DecodeUpstreamError(http.StatusTooManyRequests, nil, nil)
+	assert.Equal(t, http.StatusTooManyRequests, rateLimit.StatusCode())
+}
+
 func TestDecodeUpstreamErrorDoesNotExposeHTML(t *testing.T) {
 	err := DecodeUpstreamError(http.StatusBadGateway, nil, []byte(`<html>Bearer secret</html>`))
 	assert.Equal(t, "upstream request failed", err.Message)

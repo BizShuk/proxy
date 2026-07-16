@@ -16,8 +16,14 @@ const MAX_UPSTREAM_ERROR_MESSAGE_BYTES = 512
 
 // DecodeUpstreamError converts an upstream HTTP failure into a safe proxy error.
 func DecodeUpstreamError(status int, headers http.Header, body []byte) *protocol.ProxyError {
+	redirect := status >= http.StatusMultipleChoices && status < http.StatusBadRequest
+	kind := upstreamErrorKind(status)
+	if redirect {
+		status = http.StatusBadGateway
+		kind = protocol.ERROR_UPSTREAM
+	}
 	proxyErr := &protocol.ProxyError{
-		Kind:    upstreamErrorKind(status),
+		Kind:    kind,
 		Status:  status,
 		Code:    "upstream_error",
 		Message: "upstream request failed",
@@ -30,6 +36,9 @@ func DecodeUpstreamError(status int, headers http.Header, body []byte) *protocol
 				break
 			}
 		}
+	}
+	if redirect {
+		return proxyErr
 	}
 	var payload struct {
 		Error struct {
