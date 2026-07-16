@@ -59,6 +59,83 @@ func TestNewClientValidatesDependenciesAndClonesTransport(t *testing.T) {
 	assert.Equal(t, time.Duration(validTimeouts.MessagesMs)*time.Millisecond, cloned.ResponseHeaderTimeout)
 }
 
+func TestClientDoNeverFollowsRedirects(t *testing.T) {
+	redirects := []struct {
+		name        string
+		locationFor func(string) string
+	}{
+		{
+			name: "different hostname",
+			locationFor: func(targetURL string) string {
+				return strings.Replace(targetURL, "127.0.0.1", "localhost", 1)
+			},
+		},
+		{
+			name:        "same hostname different port",
+			locationFor: func(targetURL string) string { return targetURL },
+		},
+	}
+	credentials := []struct {
+		name       string
+		profileID  string
+		target     protocol.Format
+		credential *auth.Credential
+	}{
+		{
+			name:       "Authorization",
+			profileID:  "xai",
+			target:     protocol.FORMAT_OPENAI_RESPONSES,
+			credential: &auth.Credential{Provider: "xai", Kind: auth.KIND_API_KEY, APIKey: "secret"},
+		},
+		{
+			name:       "x-api-key",
+			profileID:  "anthropic",
+			target:     protocol.FORMAT_ANTHROPIC_MESSAGES,
+			credential: &auth.Credential{Provider: "anthropic", Kind: auth.KIND_API_KEY, APIKey: "secret"},
+		},
+	}
+	for _, redirect := range redirects {
+		for _, credential := range credentials {
+			t.Run(redirect.name+"/"+credential.name, func(t *testing.T) {
+				var redirected bool
+				var authorization string
+				var apiKey string
+				target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					redirected = true
+					authorization = r.Header.Get("Authorization")
+					apiKey = r.Header.Get("x-api-key")
+					w.WriteHeader(http.StatusOK)
+				}))
+				defer target.Close()
+
+				source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Location", redirect.locationFor(target.URL))
+					w.WriteHeader(http.StatusTemporaryRedirect)
+				}))
+				defer source.Close()
+
+				injected := source.Client()
+				injected.CheckRedirect = func(*http.Request, []*http.Request) error { return nil }
+				client, err := NewClient(injected, timeoutConfig())
+				require.NoError(t, err)
+				profile := defaultProfile(t, credential.profileID)
+				profile.BaseURL = source.URL
+
+				response, err := client.Do(context.Background(), profile, credential.credential, protocol.RequestEnvelope{
+					TargetFormat: credential.target, Body: []byte(`{}`),
+				})
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+
+				assert.Equal(t, http.StatusTemporaryRedirect, response.StatusCode)
+				assert.False(t, redirected)
+				assert.Empty(t, authorization)
+				assert.Empty(t, apiKey)
+			})
+		}
+	}
+}
+
 func TestClientDoUsesProfileEndpointAndSanitizedHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/v1/responses", r.URL.Path)

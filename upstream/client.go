@@ -43,6 +43,9 @@ func NewClient(httpClient *http.Client, cfg config.ProxyTimeoutConfig) (*Client,
 
 	clone := *httpClient
 	clone.Timeout = 0
+	clone.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	transport := clone.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
