@@ -116,6 +116,28 @@ func (c *Catalog) Lookup(id string) (Profile, bool) {
 	return cloneProfile(profile), true
 }
 
+// AdvertisedModels returns the catalog's unique model identifiers and prefixes.
+func (c *Catalog) AdvertisedModels() []string {
+	if c == nil {
+		return nil
+	}
+	unique := make(map[string]struct{})
+	for _, profile := range c.profiles {
+		for _, model := range profile.AdvertisedModels {
+			model = strings.TrimSpace(model)
+			if model != "" {
+				unique[model] = struct{}{}
+			}
+		}
+	}
+	models := make([]string, 0, len(unique))
+	for model := range unique {
+		models = append(models, model)
+	}
+	slices.Sort(models)
+	return models
+}
+
 // NewRouter creates a deterministic router from the catalog's provider families.
 func (c *Catalog) NewRouter() (*route.Router, error) {
 	if c == nil {

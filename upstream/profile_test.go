@@ -7,6 +7,7 @@ import (
 
 	"github.com/bizshuk/agentsdk/auth"
 	"github.com/bizshuk/proxy/protocol"
+	"github.com/bizshuk/proxy/route"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -211,6 +212,28 @@ func TestAnthropicProfileHeaderMetadata(t *testing.T) {
 	assert.Equal(t, "/v1/messages/count_tokens", profile.CountTokensEndpoint)
 	assert.Equal(t, []string{"content-type", "retry-after", "x-request-id", "request-id", "cf-ray"}, profile.AllowedResponseHeaders)
 	assert.Equal(t, http.CanonicalHeaderKey("anthropic-version"), http.CanonicalHeaderKey("Anthropic-Version"))
+}
+
+func TestCatalogAdvertisedModelsAreDeterministicAndUnique(t *testing.T) {
+	catalog, err := NewCatalog([]Profile{
+		{
+			ID: "b", Routing: route.Profile{ID: "b", Qualifiers: []string{"b"}},
+			CredentialProvider: "b", BaseURL: "https://b.example.com",
+			Endpoints: map[protocol.Format]string{protocol.FORMAT_OPENAI_CHAT: "/v1/chat/completions"},
+			Preferred: protocol.FORMAT_OPENAI_CHAT, NormalizeRequest: preserveRequest,
+			AdvertisedModels: []string{"shared", "z-model"},
+		},
+		{
+			ID: "a", Routing: route.Profile{ID: "a", Qualifiers: []string{"a"}},
+			CredentialProvider: "a", BaseURL: "https://a.example.com",
+			Endpoints: map[protocol.Format]string{protocol.FORMAT_OPENAI_CHAT: "/v1/chat/completions"},
+			Preferred: protocol.FORMAT_OPENAI_CHAT, NormalizeRequest: preserveRequest,
+			AdvertisedModels: []string{"a-model", "shared"},
+		},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"a-model", "shared", "z-model"}, catalog.AdvertisedModels())
 }
 
 func profileFormatPtr(value protocol.Format) *protocol.Format {

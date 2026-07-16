@@ -10,25 +10,70 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/bizshuk/agentsdk/auth"
+	"github.com/bizshuk/agentsdk/auth/provider"
 	"github.com/bizshuk/agentsdk/config"
-	"github.com/bizshuk/proxy/adaptor"
+	"github.com/bizshuk/proxy/protocol"
+	"github.com/bizshuk/proxy/transform"
+	"github.com/bizshuk/proxy/upstream"
 	"github.com/bizshuk/gosdk/mw"
 	"github.com/bizshuk/gosdk/router"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel"
 )
 
 const shutdownTimeout = 10 * time.Second
 
 // Server holds the assembled engine and its runtime config.
 type Server struct {
-	cfg    *config.ProxyConfig
-	engine *gin.Engine
+	cfg     *config.ProxyConfig
+	engine  *gin.Engine
+	handler *Handler
 }
 
 // New builds the engine with the full middleware stack and route table.
-func New(cfg *config.ProxyConfig) *Server {
+func New(cfg *config.ProxyConfig) (*Server, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("new proxy server: config is required")
+	}
+	store, err := auth.NewFileStore(cfg.AuthDir)
+	if err != nil {
+		return nil, fmt.Errorf("new proxy server credential store: %w", err)
+	}
+	credentials := upstream.NewCredentialResolver(store, func(credential *auth.Credential) (auth.Authenticator, error) {
+		return provider.For(credential)
+	}, os.LookupEnv)
+	catalog, err := upstream.DefaultCatalog()
+	if err != nil {
+		return nil, fmt.Errorf("new proxy server catalog: %w", err)
+	}
+	modelRouter, err := catalog.NewRouter()
+	if err != nil {
+		return nil, fmt.Errorf("new proxy server router: %w", err)
+	}
+	registry, err := transform.NewDefaultRegistry()
+	if err != nil {
+		return nil, fmt.Errorf("new proxy server transform registry: %w", err)
+	}
+	client, err := upstream.NewClient(http.DefaultClient, cfg.Timeouts)
+	if err != nil {
+		return nil, fmt.Errorf("new proxy server upstream client: %w", err)
+	}
+	observer, err := NewTransformObserver(slog.Default(), otel.Meter("github.com/bizshuk/proxy"))
+	if err != nil {
+		return nil, fmt.Errorf("new proxy server observer: %w", err)
+	}
+	handler, err := NewHandler(HandlerDeps{
+		Router: modelRouter, Registry: registry, Catalog: catalog,
+		Credentials: credentials, Client: client, Observer: observer,
+		MaxBodyBytes: int64(cfg.BodyLimit) << 20,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new proxy server handler: %w", err)
+	}
 	if cfg.Debug == "off" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -42,39 +87,25 @@ func New(cfg *config.ProxyConfig) *Server {
 	router.HealthRouterGroup(engine)
 	router.PingRouterGroup(engine)
 
-	s := &Server{cfg: cfg, engine: engine}
+	s := &Server{cfg: cfg, engine: engine, handler: handler}
 	s.registerRoutes()
-	return s
+	return s, nil
 }
 
-// registerRoutes wires the public API surface. Handlers are stubbed at P0 and
-// filled in per milestone (anthropic → translate → codex → cursor).
+// registerRoutes wires the public API surface to the generic pairwise handler.
 func (s *Server) registerRoutes() {
 	s.engine.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	ad, err := adaptor.New(s.cfg)
-	if err != nil {
-		slog.Error("failed to initialize adaptor", "err", err)
-	}
-
 	keys := s.cfg.APIKeySet()
 	v1 := s.engine.Group("/v1", requireAPIKey(keys), rateLimitPerIP())
 	{
-		if ad != nil {
-			v1.GET("/models", ad.HandleModels())
-			v1.POST("/chat/completions", ad.HandleChatCompletions())
-			v1.POST("/responses", ad.HandleResponses())
-			v1.POST("/messages", ad.HandleMessages())
-			v1.POST("/messages/count_tokens", ad.HandleCountTokens())
-		} else {
-			v1.GET("/models", notImplemented("models"))
-			v1.POST("/chat/completions", notImplemented("chat/completions"))
-			v1.POST("/responses", notImplemented("responses"))
-			v1.POST("/messages", notImplemented("messages"))
-			v1.POST("/messages/count_tokens", notImplemented("count_tokens"))
-		}
+		v1.GET("/models", s.handler.HandleModels())
+		v1.POST("/chat/completions", s.handler.Handle(protocol.FORMAT_OPENAI_CHAT))
+		v1.POST("/responses", s.handler.Handle(protocol.FORMAT_OPENAI_RESPONSES))
+		v1.POST("/messages", s.handler.Handle(protocol.FORMAT_ANTHROPIC_MESSAGES))
+		v1.POST("/messages/count_tokens", s.handler.HandleCountTokens())
 	}
 
 	admin := s.engine.Group("/admin", requireAPIKey(keys))
