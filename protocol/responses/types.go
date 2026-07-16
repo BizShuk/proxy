@@ -118,15 +118,21 @@ type ResponseError struct {
 	Message string `json:"message,omitempty"`
 }
 
+// IncompleteDetails explains why a Responses result stopped early.
+type IncompleteDetails struct {
+	Reason string `json:"reason,omitempty"`
+}
+
 // Response is a successful or failed OpenAI Responses result.
 type Response struct {
-	ID     string         `json:"id,omitempty"`
-	Object string         `json:"object,omitempty"`
-	Model  string         `json:"model,omitempty"`
-	Output []OutputItem   `json:"output,omitempty"`
-	Status string         `json:"status,omitempty"`
-	Usage  *Usage         `json:"usage,omitempty"`
-	Error  *ResponseError `json:"error,omitempty"`
+	ID                string             `json:"id,omitempty"`
+	Object            string             `json:"object,omitempty"`
+	Model             string             `json:"model,omitempty"`
+	Output            []OutputItem       `json:"output,omitempty"`
+	Status            string             `json:"status,omitempty"`
+	Usage             *Usage             `json:"usage,omitempty"`
+	Error             *ResponseError     `json:"error,omitempty"`
+	IncompleteDetails *IncompleteDetails `json:"incomplete_details,omitempty"`
 }
 
 // DecodeInput normalizes the accepted string-or-array input union.
