@@ -1,0 +1,25 @@
+{
+  "model": "source-model",
+  "system": [{"type": "text", "text": "You are concise."}],
+  "messages": [
+    {"role": "user", "content": [
+      {"type": "text", "text": "inspect"},
+      {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "aW1n"}}
+    ]},
+    {"role": "assistant", "content": [
+      {"type": "text", "text": "checking"},
+      {"type": "thinking", "thinking": "I should read the file", "signature": "sig"},
+      {"type": "tool_use", "id": "call_1", "name": "read", "input": {"path": "a.txt"}}
+    ]},
+    {"role": "user", "content": [
+      {"type": "tool_result", "tool_use_id": "call_1", "content": "ok"}
+    ]}
+  ],
+  "max_tokens": 512,
+  "temperature": 0.2,
+  "top_p": 0.9,
+  "stop_sequences": ["STOP"],
+  "tools": [{"name": "read", "description": "Read a file", "input_schema": {"type": "object"}}],
+  "tool_choice": {"type": "tool", "name": "read"},
+  "thinking": {"type": "enabled", "budget_tokens": 2048}
+}
