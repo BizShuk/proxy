@@ -1,0 +1,38 @@
+{
+  "model": "target-model",
+  "messages": [
+    {"role": "system", "content": "You are concise."},
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "inspect"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,aW1n"}}
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "checking",
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {"name": "read", "arguments": "{\"path\":\"a.txt\"}"}
+        }
+      ]
+    },
+    {"role": "tool", "content": "ok", "tool_call_id": "call_1", "name": "read"}
+  ],
+  "stream": true,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read",
+        "description": "Read a file",
+        "parameters": {"type": "object"}
+      }
+    }
+  ],
+  "tool_choice": {"type": "function", "function": {"name": "read"}},
+  "reasoning_effort": "medium"
+}

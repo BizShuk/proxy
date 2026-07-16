@@ -1,0 +1,37 @@
+{
+  "model": "target-model",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {"type": "input_text", "text": "inspect"},
+        {"type": "input_image", "image_url": "data:image/png;base64,aW1n"}
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [{"type": "output_text", "text": "checking"}]
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "read",
+      "arguments": "{\"path\":\"a.txt\"}"
+    },
+    {"type": "function_call_output", "call_id": "call_1", "output": "ok"}
+  ],
+  "instructions": "You are concise.\nUse approved tools.",
+  "stream": true,
+  "tools": [
+    {
+      "type": "function",
+      "name": "read",
+      "description": "Read a file",
+      "parameters": {"type": "object"}
+    }
+  ],
+  "tool_choice": {"type": "function", "name": "read"},
+  "reasoning": {"effort": "medium"}
+}
