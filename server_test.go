@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/bizshuk/agentsdk/config"
 	"github.com/stretchr/testify/assert"
@@ -31,6 +32,29 @@ func TestNewServerRejectsInvalidConfiguration(t *testing.T) {
 	server, err := New(cfg)
 	require.Error(t, err)
 	assert.Nil(t, server)
+}
+
+func TestNewServerRejectsBodyLimitThatOverflowsBytes(t *testing.T) {
+	cfg := testProxyConfig(t)
+	cfg.BodyLimit = (1 << 44) + 1
+
+	server, err := New(cfg)
+
+	require.Error(t, err)
+	assert.Nil(t, server)
+}
+
+func TestNewHTTPServerUsesStreamingSafeTimeouts(t *testing.T) {
+	handler := http.NewServeMux()
+
+	server := newHTTPServer("127.0.0.1:8317", handler)
+
+	assert.Equal(t, "127.0.0.1:8317", server.Addr)
+	assert.Same(t, handler, server.Handler)
+	assert.Equal(t, 10*time.Second, server.ReadHeaderTimeout)
+	assert.Equal(t, 2*time.Minute, server.IdleTimeout)
+	assert.Equal(t, 1<<20, server.MaxHeaderBytes)
+	assert.Zero(t, server.WriteTimeout)
 }
 
 func testProxyConfig(t *testing.T) *config.ProxyConfig {

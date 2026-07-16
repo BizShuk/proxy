@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"time"
@@ -25,7 +26,14 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
-const shutdownTimeout = 10 * time.Second
+const (
+	SHUTDOWN_TIMEOUT    = 10 * time.Second
+	READ_HEADER_TIMEOUT = 10 * time.Second
+	IDLE_TIMEOUT        = 2 * time.Minute
+	MAX_HEADER_BYTES    = 1 << 20
+	BYTES_PER_MEBIBYTE  = int64(1 << 20)
+	MAX_BODY_LIMIT_MB   = math.MaxInt64 / BYTES_PER_MEBIBYTE
+)
 
 // Server holds the assembled engine and its runtime config.
 type Server struct {
@@ -38,6 +46,9 @@ type Server struct {
 func New(cfg *config.ProxyConfig) (*Server, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("new proxy server: config is required")
+	}
+	if cfg.BodyLimit <= 0 || int64(cfg.BodyLimit) > MAX_BODY_LIMIT_MB {
+		return nil, fmt.Errorf("new proxy server: body limit must be between 1 and %d MB", MAX_BODY_LIMIT_MB)
 	}
 	store, err := auth.NewFileStore(cfg.AuthDir)
 	if err != nil {
@@ -69,7 +80,7 @@ func New(cfg *config.ProxyConfig) (*Server, error) {
 	handler, err := NewHandler(HandlerDeps{
 		Router: modelRouter, Registry: registry, Catalog: catalog,
 		Credentials: credentials, Client: client, Observer: observer,
-		MaxBodyBytes: int64(cfg.BodyLimit) << 20,
+		MaxBodyBytes: int64(cfg.BodyLimit) * BYTES_PER_MEBIBYTE,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server handler: %w", err)
@@ -128,7 +139,7 @@ func notImplemented(name string) gin.HandlerFunc {
 // graceful shutdown. Mirrors gosdk/server.Run's lifecycle for consistency.
 func (s *Server) Run(ctx context.Context) error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)
-	srv := &http.Server{Addr: addr, Handler: s.engine}
+	srv := newHTTPServer(addr, s.engine)
 
 	listenErr := make(chan error, 1)
 	go func() {
@@ -151,11 +162,23 @@ func (s *Server) Run(ctx context.Context) error {
 		slog.Info("shutdown requested", "reason", ctx.Err())
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), SHUTDOWN_TIMEOUT)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("server shutdown: %w", err)
 	}
 	<-listenErr
 	return nil
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: READ_HEADER_TIMEOUT,
+		IdleTimeout:       IDLE_TIMEOUT,
+		MaxHeaderBytes:    MAX_HEADER_BYTES,
+		// Streaming responses such as SSE must not be terminated by a fixed deadline.
+		WriteTimeout: 0,
+	}
 }
