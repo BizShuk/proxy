@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/bizshuk/proxy/protocol"
-	"github.com/bizshuk/proxy/protocol/anthropic"
 	"github.com/bizshuk/proxy/route"
 	"github.com/bizshuk/proxy/transform"
 	"github.com/bizshuk/proxy/upstream"
@@ -22,6 +21,8 @@ import (
 )
 
 const MAX_UPSTREAM_ERROR_BYTES int64 = 64 << 10
+
+var errUpstreamResponseTooLarge = errors.New("upstream response exceeds limit")
 
 // Handler coordinates routing, protocol transforms, credentials, and upstream I/O.
 type Handler struct {
@@ -202,7 +203,7 @@ func (h *Handler) HandleCountTokens() gin.HandlerFunc {
 			h.writeError(c, protocol.FORMAT_ANTHROPIC_MESSAGES, err)
 			return
 		}
-		request, err := anthropic.DecodeRequest(body)
+		request, model, err := decodeCountTokensRequest(body)
 		if err != nil {
 			h.writeError(c, protocol.FORMAT_ANTHROPIC_MESSAGES, &protocol.ProxyError{
 				Kind: protocol.ERROR_INVALID_REQUEST, Status: http.StatusBadRequest,
@@ -210,7 +211,7 @@ func (h *Handler) HandleCountTokens() gin.HandlerFunc {
 			})
 			return
 		}
-		routed, err := h.router.Resolve(protocol.FORMAT_ANTHROPIC_MESSAGES, request.Model)
+		routed, err := h.router.Resolve(protocol.FORMAT_ANTHROPIC_MESSAGES, model)
 		if err != nil {
 			h.writeError(c, protocol.FORMAT_ANTHROPIC_MESSAGES, err)
 			return
@@ -232,8 +233,12 @@ func (h *Handler) HandleCountTokens() gin.HandlerFunc {
 			})
 			return
 		}
-		request.Model = routed.Model
-		translatedBody, err := anthropic.Encode(request)
+		request["model"], err = json.Marshal(routed.Model)
+		if err != nil {
+			h.writeError(c, protocol.FORMAT_ANTHROPIC_MESSAGES, protocolStreamError("cannot encode token count model", err))
+			return
+		}
+		translatedBody, err := json.Marshal(request)
 		if err != nil {
 			h.writeError(c, protocol.FORMAT_ANTHROPIC_MESSAGES, protocolStreamError("cannot encode token count request", err))
 			return
@@ -260,17 +265,46 @@ func (h *Handler) HandleCountTokens() gin.HandlerFunc {
 			return
 		}
 		var result struct {
-			InputTokens int `json:"input_tokens"`
+			InputTokens *int `json:"input_tokens"`
 		}
 		if err := json.Unmarshal(responseBody, &result); err != nil {
 			h.writeError(c, protocol.FORMAT_ANTHROPIC_MESSAGES, protocolStreamError("invalid token count response", err))
 			return
 		}
+		if result.InputTokens == nil || *result.InputTokens < 0 {
+			h.writeError(c, protocol.FORMAT_ANTHROPIC_MESSAGES, protocolStreamError("invalid token count response", nil))
+			return
+		}
+		canonicalBody, err := json.Marshal(struct {
+			InputTokens int `json:"input_tokens"`
+		}{InputTokens: *result.InputTokens})
+		if err != nil {
+			h.writeError(c, protocol.FORMAT_ANTHROPIC_MESSAGES, protocolStreamError("cannot encode token count response", err))
+			return
+		}
 		copySafeResponseHeaders(c.Writer.Header(), response.Header, profile)
 		c.Header("Content-Type", "application/json")
 		c.Header("x-request-id", headers.Get("x-request-id"))
-		c.Data(http.StatusOK, "application/json", responseBody)
+		c.Data(http.StatusOK, "application/json", canonicalBody)
 	}
+}
+
+func decodeCountTokensRequest(body []byte) (map[string]json.RawMessage, string, error) {
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(body, &request); err != nil {
+		return nil, "", fmt.Errorf("decode token count request: %w", err)
+	}
+	if request == nil {
+		return nil, "", fmt.Errorf("decode token count request: JSON object is required")
+	}
+	var model string
+	if err := json.Unmarshal(request["model"], &model); err != nil {
+		return nil, "", fmt.Errorf("decode token count request: model must be a string: %w", err)
+	}
+	if strings.TrimSpace(model) == "" {
+		return nil, "", fmt.Errorf("decode token count request: model must not be blank")
+	}
+	return request, model, nil
 }
 
 func (h *Handler) handleStream(
@@ -296,7 +330,7 @@ func (h *Handler) handleStream(
 	c.Header("x-request-id", exchange.TranslatedRequest.Headers.Get("x-request-id"))
 	c.Status(http.StatusOK)
 
-	decoder := protocol.NewSSEDecoder(response.Body)
+	decoder := protocol.NewBoundedSSEDecoder(response.Body, h.maxBodyBytes)
 	for {
 		if c.Request.Context().Err() != nil {
 			return
@@ -411,10 +445,16 @@ func (h *Handler) handleBridge(
 		h.writeError(c, source, err)
 		return
 	}
-	decoder := protocol.NewSSEDecoder(response.Body)
+	boundedCollector := newBoundedStreamCollector(collector, h.maxBodyBytes)
+	upstreamBody := &io.LimitedReader{R: response.Body, N: h.maxBodyBytes + 1}
+	decoder := protocol.NewBoundedSSEDecoder(upstreamBody, h.maxBodyBytes)
 	for {
 		frame, decodeErr := decoder.Next()
 		if errors.Is(decodeErr, io.EOF) {
+			if upstreamBody.N == 0 {
+				h.writeError(c, source, protocolStreamError("upstream event stream exceeds limit", errUpstreamResponseTooLarge))
+				return
+			}
 			break
 		}
 		if decodeErr != nil {
@@ -427,7 +467,7 @@ func (h *Handler) handleBridge(
 			return
 		}
 		for _, translatedFrame := range frames {
-			if err := collector.Push(c.Request.Context(), translatedFrame); err != nil {
+			if err := boundedCollector.Push(c.Request.Context(), translatedFrame); err != nil {
 				h.writeError(c, source, err)
 				return
 			}
@@ -439,12 +479,12 @@ func (h *Handler) handleBridge(
 		return
 	}
 	for _, frame := range closing {
-		if err := collector.Push(c.Request.Context(), frame); err != nil {
+		if err := boundedCollector.Push(c.Request.Context(), frame); err != nil {
 			h.writeError(c, source, err)
 			return
 		}
 	}
-	result, err := collector.Close(c.Request.Context())
+	result, err := boundedCollector.Close(c.Request.Context())
 	if err != nil {
 		h.writeError(c, source, err)
 		return
@@ -456,9 +496,46 @@ func (h *Handler) handleBridge(
 	c.Data(http.StatusOK, "application/json", result.Body)
 }
 
+type boundedStreamCollector struct {
+	collector transform.StreamCollector
+	limit     int64
+	used      int64
+}
+
+func newBoundedStreamCollector(collector transform.StreamCollector, limit int64) *boundedStreamCollector {
+	return &boundedStreamCollector{collector: collector, limit: limit}
+}
+
+func (c *boundedStreamCollector) Push(ctx context.Context, frame protocol.SSEFrame) error {
+	size := int64(len(frame.Event) + len(frame.ID) + len(frame.Data))
+	for _, comment := range frame.Comments {
+		size += int64(len(comment))
+	}
+	if size > c.limit-c.used {
+		return protocolStreamError("collected stream exceeds limit", errUpstreamResponseTooLarge)
+	}
+	c.used += size
+	return c.collector.Push(ctx, frame)
+}
+
+func (c *boundedStreamCollector) Close(ctx context.Context) (protocol.TransformResult, error) {
+	result, err := c.collector.Close(ctx)
+	if err != nil {
+		return protocol.TransformResult{}, err
+	}
+	if int64(len(result.Body)) > c.limit {
+		return protocol.TransformResult{}, protocolStreamError("collected response exceeds limit", errUpstreamResponseTooLarge)
+	}
+	return result, nil
+}
+
 func (h *Handler) handleUpstreamError(c *gin.Context, source protocol.Format, response *http.Response) {
 	body, err := readBounded(response.Body, MAX_UPSTREAM_ERROR_BYTES)
 	if err != nil {
+		if errors.Is(err, errUpstreamResponseTooLarge) {
+			h.writeError(c, source, transform.DecodeUpstreamError(response.StatusCode, response.Header, nil))
+			return
+		}
 		h.writeError(c, source, err)
 		return
 	}
@@ -480,7 +557,7 @@ func readBounded(reader io.Reader, limit int64) ([]byte, error) {
 		return nil, protocolStreamError("cannot read upstream response", err)
 	}
 	if int64(len(body)) > limit {
-		return nil, protocolStreamError("upstream response exceeds limit", nil)
+		return nil, protocolStreamError("upstream response exceeds limit", errUpstreamResponseTooLarge)
 	}
 	return body, nil
 }

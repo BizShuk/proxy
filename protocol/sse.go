@@ -12,6 +12,14 @@ import (
 // ErrUnexpectedEOF means an SSE frame ended without its blank-line boundary.
 var ErrUnexpectedEOF = errors.New("unexpected EOF inside SSE frame")
 
+// ErrSSELineTooLarge means one SSE line exceeded the configured byte limit.
+var ErrSSELineTooLarge = errors.New("SSE line exceeds limit")
+
+// ErrSSEFrameTooLarge means one SSE frame exceeded the configured byte limit.
+var ErrSSEFrameTooLarge = errors.New("SSE frame exceeds limit")
+
+const MAX_SSE_FRAME_BYTES int64 = 1 << 20
+
 // SSEFrame is one complete Server-Sent Events frame.
 type SSEFrame struct {
 	Event       string
@@ -23,12 +31,23 @@ type SSEFrame struct {
 
 // SSEDecoder reads complete SSE frames from an input stream.
 type SSEDecoder struct {
-	reader *bufio.Reader
+	reader        *bufio.Reader
+	maxLineBytes  int64
+	maxFrameBytes int64
 }
 
 // NewSSEDecoder returns a full-frame SSE decoder.
 func NewSSEDecoder(reader io.Reader) *SSEDecoder {
-	return &SSEDecoder{reader: bufio.NewReader(reader)}
+	return NewBoundedSSEDecoder(reader, MAX_SSE_FRAME_BYTES)
+}
+
+// NewBoundedSSEDecoder returns an SSE decoder with per-line and per-frame limits.
+func NewBoundedSSEDecoder(reader io.Reader, maxBytes int64) *SSEDecoder {
+	return &SSEDecoder{
+		reader:        bufio.NewReader(reader),
+		maxLineBytes:  maxBytes,
+		maxFrameBytes: maxBytes,
+	}
 }
 
 // Next returns the next frame after its blank-line terminator.
@@ -36,16 +55,25 @@ func (d *SSEDecoder) Next() (SSEFrame, error) {
 	if d == nil || d.reader == nil {
 		return SSEFrame{}, fmt.Errorf("decode SSE: nil reader")
 	}
+	if d.maxLineBytes <= 0 || d.maxFrameBytes <= 0 {
+		return SSEFrame{}, fmt.Errorf("decode SSE: byte limit must be positive")
+	}
 	var frame SSEFrame
 	var dataLines []string
 	sawRecognizedLine := false
+	var frameBytes int64
 
 	for {
-		line, err := d.reader.ReadString('\n')
+		lineBytes, err := d.readLine()
 		if err != nil && !errors.Is(err, io.EOF) {
 			return SSEFrame{}, fmt.Errorf("read SSE line: %w", err)
 		}
-		if len(line) > 0 {
+		frameBytes += int64(len(lineBytes))
+		if frameBytes > d.maxFrameBytes {
+			return SSEFrame{}, fmt.Errorf("%w: limit %d bytes", ErrSSEFrameTooLarge, d.maxFrameBytes)
+		}
+		if len(lineBytes) > 0 {
+			line := string(lineBytes)
 			line = strings.TrimSuffix(line, "\n")
 			line = strings.TrimSuffix(line, "\r")
 			if line == "" {
@@ -70,6 +98,21 @@ func (d *SSEDecoder) Next() (SSEFrame, error) {
 			}
 			return SSEFrame{}, io.EOF
 		}
+	}
+}
+
+func (d *SSEDecoder) readLine() ([]byte, error) {
+	line := make([]byte, 0, min(int64(d.reader.Size()), d.maxLineBytes))
+	for {
+		fragment, err := d.reader.ReadSlice('\n')
+		if int64(len(line))+int64(len(fragment)) > d.maxLineBytes {
+			return nil, fmt.Errorf("%w: limit %d bytes", ErrSSELineTooLarge, d.maxLineBytes)
+		}
+		line = append(line, fragment...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		return line, err
 	}
 }
 

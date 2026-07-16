@@ -46,6 +46,16 @@ func (fn handlerRoundTripFunc) RoundTrip(request *http.Request) (*http.Response,
 	return fn(request)
 }
 
+type fixedStreamCollector struct {
+	result protocol.TransformResult
+}
+
+func (*fixedStreamCollector) Push(context.Context, protocol.SSEFrame) error { return nil }
+
+func (c *fixedStreamCollector) Close(context.Context) (protocol.TransformResult, error) {
+	return c.result, nil
+}
+
 var handlerSourceCases = []struct {
 	name   string
 	format protocol.Format
@@ -377,11 +387,12 @@ func TestHandlerEnforcesRequestAndUpstreamBodyLimits(t *testing.T) {
 	})
 
 	for _, tc := range []struct {
-		name   string
-		status int
+		name       string
+		status     int
+		wantStatus int
 	}{
-		{name: "successful upstream", status: http.StatusOK},
-		{name: "error upstream", status: http.StatusTooManyRequests},
+		{name: "successful upstream", status: http.StatusOK, wantStatus: http.StatusBadGateway},
+		{name: "error upstream", status: http.StatusTooManyRequests, wantStatus: http.StatusTooManyRequests},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -399,10 +410,35 @@ func TestHandlerEnforcesRequestAndUpstreamBodyLimits(t *testing.T) {
 			router.POST("/model", handler.Handle(protocol.FORMAT_OPENAI_CHAT))
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model", bytes.NewReader(requestBody(protocol.FORMAT_OPENAI_CHAT, "xai/grok-4.5", false))))
-			assert.Equal(t, http.StatusBadGateway, response.Code)
-			assert.Contains(t, response.Body.String(), "protocol_error")
+			assert.Equal(t, tc.wantStatus, response.Code)
+			if tc.status == http.StatusOK {
+				assert.Contains(t, response.Body.String(), "protocol_error")
+			}
 		})
 	}
+}
+
+func TestHandlerOversizedUpstreamErrorPreservesMetadataWithoutParsingPartialBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "11")
+		w.Header().Set("x-request-id", "oversized-request")
+		w.WriteHeader(http.StatusTooManyRequests)
+		body := `{"error":{"code":"partial_code","message":"partial body must not be parsed"}}`
+		_, _ = io.WriteString(w, body+strings.Repeat(" ", int(MAX_UPSTREAM_ERROR_BYTES)))
+	}))
+	defer server.Close()
+	handler := newHandlerForCredential(t, apiKeyCred("xai", server.URL), server.Client())
+	router := gin.New()
+	router.POST("/model", handler.Handle(protocol.FORMAT_OPENAI_CHAT))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model", bytes.NewReader(requestBody(protocol.FORMAT_OPENAI_CHAT, "xai/grok-4.5", false))))
+
+	assert.Equal(t, http.StatusTooManyRequests, response.Code)
+	assert.Equal(t, "11", response.Header().Get("Retry-After"))
+	assert.Equal(t, "oversized-request", response.Header().Get("x-request-id"))
+	assert.Contains(t, response.Body.String(), "upstream request failed")
+	assert.NotContains(t, response.Body.String(), "partial body must not be parsed")
+	assert.NotContains(t, response.Body.String(), "partial_code")
 }
 
 func TestHandlerPreservesUpstreamRateLimitMetadata(t *testing.T) {
@@ -442,6 +478,26 @@ func TestHandlerEmitsTerminalErrorWhenUpstreamStreamEndsEarly(t *testing.T) {
 	assert.Contains(t, response.Body.String(), "[DONE]")
 }
 
+func TestHandlerEmitsTerminalErrorWhenOneUpstreamSSEFrameExceedsLimit(t *testing.T) {
+	oversized := strings.Repeat("x", 512)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n")
+		_, _ = fmt.Fprintf(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":%q}\n\n", oversized)
+	}))
+	defer server.Close()
+	handler := newHandlerForCredentialWithLimit(t, apiKeyCred("xai", server.URL), server.Client(), 256)
+	router := gin.New()
+	router.POST("/model", handler.Handle(protocol.FORMAT_OPENAI_CHAT))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model", bytes.NewReader(requestBody(protocol.FORMAT_OPENAI_CHAT, "xai/grok-4.5", true))))
+
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), "stream terminated")
+	assert.Contains(t, response.Body.String(), "[DONE]")
+	assert.NotContains(t, response.Body.String(), oversized)
+}
+
 func TestHandlerNonStreamBridgeDoesNotCommitPartialSSE(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -458,6 +514,43 @@ func TestHandlerNonStreamBridgeDoesNotCommitPartialSSE(t *testing.T) {
 	assert.Equal(t, "application/json", response.Header().Get("Content-Type"))
 	assert.Contains(t, response.Body.String(), "protocol_error")
 	assert.NotContains(t, response.Body.String(), "response.created")
+}
+
+func TestHandlerNonStreamBridgeRejectsUpstreamSSETotalOverLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5\",\"status\":\"in_progress\"}}\n\n")
+		for _, delta := range []string{"one", "two", "three"} {
+			_, _ = fmt.Fprintf(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":%q}\n\n", delta)
+		}
+		_, _ = io.WriteString(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5\",\"status\":\"completed\"}}\n\n")
+	}))
+	defer server.Close()
+	handler := newHandlerForCredentialWithLimit(t, oauthCred("openai", server.URL), server.Client(), 256)
+	router := gin.New()
+	router.POST("/model", handler.Handle(protocol.FORMAT_OPENAI_CHAT))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model", bytes.NewReader(requestBody(protocol.FORMAT_OPENAI_CHAT, "openai/gpt-5", false))))
+
+	assert.Equal(t, http.StatusBadGateway, response.Code)
+	assert.Equal(t, "application/json", response.Header().Get("Content-Type"))
+	assert.Contains(t, response.Body.String(), "protocol_error")
+}
+
+func TestBoundedStreamCollectorLimitsTranslatedFramesAndFinalResult(t *testing.T) {
+	t.Run("translated frames", func(t *testing.T) {
+		collector := newBoundedStreamCollector(&fixedStreamCollector{}, 8)
+		err := collector.Push(context.Background(), protocol.SSEFrame{Data: []byte("123456789")})
+		require.ErrorIs(t, err, errUpstreamResponseTooLarge)
+	})
+
+	t.Run("final result", func(t *testing.T) {
+		collector := newBoundedStreamCollector(&fixedStreamCollector{
+			result: protocol.TransformResult{Body: []byte("123456789")},
+		}, 8)
+		_, err := collector.Close(context.Background())
+		require.ErrorIs(t, err, errUpstreamResponseTooLarge)
+	})
 }
 
 func TestHandlerRejectsUnsupportedProviderCapabilityBeforeUpstream(t *testing.T) {
@@ -559,6 +652,50 @@ func TestHandlerCountTokensUsesNativeAnthropicCapability(t *testing.T) {
 	assert.Equal(t, "/v1/messages/count_tokens", gotPath)
 	assert.Equal(t, "claude-3-5-sonnet-latest", gotModel)
 	assert.JSONEq(t, `{"input_tokens":42}`, response.Body.String())
+}
+
+func TestHandlerCountTokensPreservesUnknownRequestFieldsAndCanonicalizesResponse(t *testing.T) {
+	var upstreamBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		upstreamBody, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		_, _ = io.WriteString(w, `{"trace":"discard","input_tokens":42}`)
+	}))
+	defer server.Close()
+	handler := newHandlerForCredential(t, apiKeyCred("anthropic", server.URL), server.Client())
+	router := gin.New()
+	router.POST("/count", handler.HandleCountTokens())
+	requestBody := `{"model":"anthropic/claude-3-5-sonnet-latest","messages":[{"role":"user","content":"hello"}],"custom_extension":{"enabled":true}}`
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/count", strings.NewReader(requestBody)))
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.JSONEq(t, `{"input_tokens":42}`, response.Body.String())
+	var forwarded map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(upstreamBody, &forwarded))
+	assert.JSONEq(t, `{"enabled":true}`, string(forwarded["custom_extension"]))
+	assert.JSONEq(t, `"claude-3-5-sonnet-latest"`, string(forwarded["model"]))
+}
+
+func TestHandlerCountTokensRequiresNonNegativeInputTokens(t *testing.T) {
+	for _, body := range []string{`{}`, `{"input_tokens":-1}`} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, body)
+			}))
+			defer server.Close()
+			handler := newHandlerForCredential(t, apiKeyCred("anthropic", server.URL), server.Client())
+			router := gin.New()
+			router.POST("/count", handler.HandleCountTokens())
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/count", bytes.NewReader(requestBody(protocol.FORMAT_ANTHROPIC_MESSAGES, "anthropic/claude-3-5-sonnet-latest", false))))
+
+			assert.Equal(t, http.StatusBadGateway, response.Code)
+			assert.Contains(t, response.Body.String(), "invalid token count response")
+			assert.Contains(t, response.Body.String(), `"type":"error"`)
+		})
+	}
 }
 
 func TestHandlerCountTokensRejectsUnsupportedProvider(t *testing.T) {

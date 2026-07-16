@@ -33,6 +33,18 @@ func TestSSEDecoderReturnsEOFWhenEmpty(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 }
 
+func TestSSEDecoderRejectsLineOverLimit(t *testing.T) {
+	raw := "data: " + strings.Repeat("x", 32) + "\n\n"
+	_, err := NewBoundedSSEDecoder(strings.NewReader(raw), 20).Next()
+	require.ErrorIs(t, err, ErrSSELineTooLarge)
+}
+
+func TestSSEDecoderRejectsFrameOverLimit(t *testing.T) {
+	raw := "data: 12345\ndata: 67890\n\n"
+	_, err := NewBoundedSSEDecoder(strings.NewReader(raw), 20).Next()
+	require.ErrorIs(t, err, ErrSSEFrameTooLarge)
+}
+
 func TestWriteSSERoundTrip(t *testing.T) {
 	retry := 250
 	want := SSEFrame{
