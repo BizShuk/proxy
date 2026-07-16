@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -18,12 +19,14 @@ func requireAPIKey(keys map[string]struct{}) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := extractAPIKey(c.Request)
 		if key == "" {
+			slog.Error("auth failed", "reason", "missing API key", "ip", c.ClientIP(), "path", c.Request.URL.Path)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{"message": "Missing API key"},
 			})
 			return
 		}
 		if !validKey(keys, key) {
+			slog.Error("auth failed", "reason", "invalid API key", "ip", c.ClientIP(), "path", c.Request.URL.Path)
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": gin.H{"message": "Invalid API key"},
 			})

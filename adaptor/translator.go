@@ -13,6 +13,11 @@ import (
 // Anthropic DTOs
 // ---------------------------------------------------------------------------
 
+type AnthropicThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
+}
+
 type AnthropicRequest struct {
 	Model       string                  `json:"model"`
 	Messages    []AnthropicMessage      `json:"messages"`
@@ -23,6 +28,7 @@ type AnthropicRequest struct {
 	TopP        *float64                `json:"top_p,omitempty"`
 	Tools       []AnthropicTool         `json:"tools,omitempty"`
 	ToolChoice  any                     `json:"tool_choice,omitempty"`
+	Thinking    *AnthropicThinking      `json:"thinking,omitempty"`
 }
 
 type AnthropicMessage struct {
@@ -30,16 +36,61 @@ type AnthropicMessage struct {
 	Content []AnthropicContent `json:"content"`
 }
 
+func (m *AnthropicMessage) UnmarshalJSON(data []byte) error {
+	type Alias AnthropicMessage
+	var aux struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	m.Role = aux.Role
+	if len(aux.Content) == 0 {
+		return nil
+	}
+
+	trimmed := aux.Content
+	for len(trimmed) > 0 && (trimmed[0] == ' ' || trimmed[0] == '\t' || trimmed[0] == '\n' || trimmed[0] == '\r') {
+		trimmed = trimmed[1:]
+	}
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	if trimmed[0] == '"' {
+		var str string
+		if err := json.Unmarshal(aux.Content, &str); err != nil {
+			return err
+		}
+		m.Content = []AnthropicContent{{Type: "text", Text: str}}
+	} else {
+		var blocks []AnthropicContent
+		if err := json.Unmarshal(aux.Content, &blocks); err != nil {
+			return err
+		}
+		m.Content = blocks
+	}
+	return nil
+}
+
+type AnthropicSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
 type AnthropicContent struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	Thinking  string          `json:"thinking,omitempty"`  // thinking block text
-	ID        string          `json:"id,omitempty"`        // tool_use id
-	Name      string          `json:"name,omitempty"`      // tool_use name
-	Input     json.RawMessage `json:"input,omitempty"`     // tool_use arguments JSON
-	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_result id
-	Content   any             `json:"content,omitempty"`   // tool_result content (string or block list)
-	IsError   bool            `json:"is_error,omitempty"`  // tool_result error flag
+	Type      string           `json:"type"`
+	Text      string           `json:"text,omitempty"`
+	Thinking  string           `json:"thinking,omitempty"`  // thinking block text
+	ID        string           `json:"id,omitempty"`        // tool_use id
+	Name      string           `json:"name,omitempty"`      // tool_use name
+	Input     json.RawMessage  `json:"input,omitempty"`     // tool_use arguments JSON
+	ToolUseID string           `json:"tool_use_id,omitempty"` // tool_result id
+	Content   any              `json:"content,omitempty"`   // tool_result content (string or block list)
+	IsError   bool             `json:"is_error,omitempty"`  // tool_result error flag
+	Source    *AnthropicSource `json:"source,omitempty"`
 }
 
 type AnthropicTool struct {
@@ -71,21 +122,24 @@ type AnthropicUsage struct {
 // ---------------------------------------------------------------------------
 
 type OpenAIChatRequest struct {
-	Model       string          `json:"model"`
-	Messages    []OpenAIMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Stream      bool            `json:"stream,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	TopP        *float64        `json:"top_p,omitempty"`
-	Tools       []OpenAITool    `json:"tools,omitempty"`
+	Model           string          `json:"model"`
+	Messages        []OpenAIMessage `json:"messages"`
+	MaxTokens       int             `json:"max_tokens,omitempty"`
+	Stream          bool            `json:"stream,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	TopP            *float64        `json:"top_p,omitempty"`
+	Tools           []OpenAITool    `json:"tools,omitempty"`
+	ToolChoice      any             `json:"tool_choice,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
 }
 
 type OpenAIMessage struct {
-	Role       string            `json:"role"`
-	Content    any               `json:"content,omitempty"` // string or []OpenAIContentPart
-	ToolCalls  []OpenAIToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string            `json:"tool_call_id,omitempty"`
-	Name       string            `json:"name,omitempty"`
+	Role             string            `json:"role"`
+	Content          any               `json:"content,omitempty"` // string or []OpenAIContentPart
+	ToolCalls        []OpenAIToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID       string            `json:"tool_call_id,omitempty"`
+	Name             string            `json:"name,omitempty"`
+	ReasoningContent string            `json:"reasoning_content,omitempty"`
 }
 
 type OpenAIContentPart struct {
@@ -156,14 +210,50 @@ type OpenAIStreamChoice struct {
 }
 
 type OpenAIStreamDelta struct {
-	Role      string           `json:"role,omitempty"`
-	Content   string           `json:"content,omitempty"`
-	ToolCalls []OpenAIToolCall `json:"tool_calls,omitempty"`
+	Role             string           `json:"role,omitempty"`
+	Content          string           `json:"content,omitempty"`
+	ToolCalls        []OpenAIToolCall `json:"tool_calls,omitempty"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
 // Translations: Anthropic Messages ⇄ OpenAI Chat Completions
 // ---------------------------------------------------------------------------
+
+func translateToolChoice(src any) any {
+	if src == nil {
+		return nil
+	}
+
+	if str, ok := src.(string); ok {
+		if str == "any" {
+			return "required"
+		}
+		return str
+	}
+
+	if m, ok := src.(map[string]any); ok {
+		t, _ := m["type"].(string)
+		switch t {
+		case "auto":
+			return "auto"
+		case "any":
+			return "required"
+		case "tool":
+			name, _ := m["name"].(string)
+			if name != "" {
+				return map[string]any{
+					"type": "function",
+					"function": map[string]any{
+						"name": name,
+					},
+				}
+			}
+		}
+	}
+
+	return src
+}
 
 // TranslateAnthropicToOpenAI maps an Anthropic Message payload to OpenAI Chat Completions payload.
 func TranslateAnthropicToOpenAI(src *AnthropicRequest) *OpenAIChatRequest {
@@ -173,6 +263,16 @@ func TranslateAnthropicToOpenAI(src *AnthropicRequest) *OpenAIChatRequest {
 		Stream:      src.Stream,
 		Temperature: src.Temperature,
 		TopP:        src.TopP,
+	}
+
+	if src.Thinking != nil && src.Thinking.Type == "enabled" {
+		effort := "medium"
+		if src.Thinking.BudgetTokens <= 1024 {
+			effort = "low"
+		} else if src.Thinking.BudgetTokens >= 4096 {
+			effort = "high"
+		}
+		dst.ReasoningEffort = effort
 	}
 
 	// 1. Inject System instruction if present
@@ -207,11 +307,14 @@ func TranslateAnthropicToOpenAI(src *AnthropicRequest) *OpenAIChatRequest {
 			// Extract assistant content, including potential tool use
 			var textBuilder strings.Builder
 			var toolCalls []OpenAIToolCall
+			var reasoningBuilder strings.Builder
 
 			for _, c := range msg.Content {
 				switch c.Type {
 				case "text":
 					textBuilder.WriteString(c.Text)
+				case "thinking":
+					reasoningBuilder.WriteString(c.Thinking)
 				case "tool_use":
 					// Build OpenAIToolCall
 					argsStr := "{}"
@@ -234,21 +337,62 @@ func TranslateAnthropicToOpenAI(src *AnthropicRequest) *OpenAIChatRequest {
 				content = textBuilder.String()
 			}
 			dst.Messages = append(dst.Messages, OpenAIMessage{
-				Role:      "assistant",
-				Content:   content,
-				ToolCalls: toolCalls,
+				Role:             "assistant",
+				Content:          content,
+				ReasoningContent: reasoningBuilder.String(),
+				ToolCalls:        toolCalls,
 			})
 
 		} else {
 			// User messages or tool results
+			var contentParts []OpenAIContentPart
+			hasImage := false
+
 			for _, c := range msg.Content {
 				switch c.Type {
 				case "text":
-					dst.Messages = append(dst.Messages, OpenAIMessage{
-						Role:    "user",
-						Content: c.Text,
+					contentParts = append(contentParts, OpenAIContentPart{
+						Type: "text",
+						Text: c.Text,
 					})
+				case "image":
+					if c.Source != nil && c.Source.Data != "" {
+						hasImage = true
+						mime := c.Source.MediaType
+						if mime == "" {
+							mime = "image/png"
+						}
+						data := c.Source.Data
+						var url string
+						if strings.HasPrefix(data, "data:") {
+							url = data
+						} else {
+							url = fmt.Sprintf("data:%s;base64,%s", mime, data)
+						}
+						contentParts = append(contentParts, OpenAIContentPart{
+							Type: "image_url",
+							ImageURL: &OpenAIImageURL{
+								URL: url,
+							},
+						})
+					}
 				case "tool_result":
+					// Flush accumulated parts
+					if len(contentParts) > 0 {
+						var finalContent any
+						if !hasImage && len(contentParts) == 1 {
+							finalContent = contentParts[0].Text
+						} else {
+							finalContent = contentParts
+						}
+						dst.Messages = append(dst.Messages, OpenAIMessage{
+							Role:    "user",
+							Content: finalContent,
+						})
+						contentParts = nil
+						hasImage = false
+					}
+
 					var outStr string
 					switch contentVal := c.Content.(type) {
 					case string:
@@ -263,6 +407,20 @@ func TranslateAnthropicToOpenAI(src *AnthropicRequest) *OpenAIChatRequest {
 						ToolCallID: c.ToolUseID,
 					})
 				}
+			}
+
+			// Push remaining content parts
+			if len(contentParts) > 0 {
+				var finalContent any
+				if !hasImage && len(contentParts) == 1 {
+					finalContent = contentParts[0].Text
+				} else {
+					finalContent = contentParts
+				}
+				dst.Messages = append(dst.Messages, OpenAIMessage{
+					Role:    "user",
+					Content: finalContent,
+				})
 			}
 		}
 	}
@@ -280,7 +438,40 @@ func TranslateAnthropicToOpenAI(src *AnthropicRequest) *OpenAIChatRequest {
 		dst.Tools = append(dst.Tools, def)
 	}
 
+	// 4. Map tool choice
+	if src.ToolChoice != nil {
+		dst.ToolChoice = translateToolChoice(src.ToolChoice)
+	}
+
 	return dst
+}
+
+func translateOpenAIToolChoiceToAnthropic(src any) any {
+	if src == nil {
+		return nil
+	}
+
+	if str, ok := src.(string); ok {
+		if str == "required" {
+			return map[string]any{"type": "any"}
+		}
+		return map[string]any{"type": str}
+	}
+
+	if m, ok := src.(map[string]any); ok {
+		if t, _ := m["type"].(string); t == "function" {
+			if fn, ok := m["function"].(map[string]any); ok {
+				if name, _ := fn["name"].(string); name != "" {
+					return map[string]any{
+						"type": "tool",
+						"name": name,
+					}
+				}
+			}
+		}
+	}
+
+	return src
 }
 
 // TranslateOpenAIToAnthropicResponse translates a non-streaming OpenAI Chat Completion response to an Anthropic response.
@@ -298,6 +489,12 @@ func TranslateOpenAIToAnthropicResponse(src *OpenAIChatResponse, targetModel str
 
 		// Map assistant message back
 		msg := choice.Message
+		if msg.ReasoningContent != "" {
+			dst.Content = append(dst.Content, AnthropicContent{
+				Type:     "thinking",
+				Thinking: msg.ReasoningContent,
+			})
+		}
 		if txt, ok := msg.Content.(string); ok && txt != "" {
 			dst.Content = append(dst.Content, AnthropicContent{
 				Type: "text",
@@ -330,6 +527,22 @@ func TranslateOpenAIToAnthropic(src *OpenAIChatRequest) *AnthropicRequest {
 		Stream:      src.Stream,
 		Temperature: src.Temperature,
 		TopP:        src.TopP,
+	}
+
+	if src.ReasoningEffort != "" {
+		budget := 2048
+		switch src.ReasoningEffort {
+		case "low":
+			budget = 1024
+		case "medium":
+			budget = 2048
+		case "high":
+			budget = 4096
+		}
+		dst.Thinking = &AnthropicThinking{
+			Type:         "enabled",
+			BudgetTokens: budget,
+		}
 	}
 
 	var systemPrompts []string
@@ -370,6 +583,12 @@ func TranslateOpenAIToAnthropic(src *OpenAIChatRequest) *AnthropicRequest {
 				Content:   outStr,
 			})
 		} else {
+			if msg.Role == "assistant" && msg.ReasoningContent != "" {
+				contents = append(contents, AnthropicContent{
+					Type:     "thinking",
+					Thinking: msg.ReasoningContent,
+				})
+			}
 			if txt, ok := msg.Content.(string); ok && txt != "" {
 				contents = append(contents, AnthropicContent{
 					Type: "text",
@@ -406,6 +625,10 @@ func TranslateOpenAIToAnthropic(src *OpenAIChatRequest) *AnthropicRequest {
 		})
 	}
 
+	if src.ToolChoice != nil {
+		dst.ToolChoice = translateOpenAIToolChoiceToAnthropic(src.ToolChoice)
+	}
+
 	return dst
 }
 
@@ -426,13 +649,33 @@ func mapFinishReason(reason string) string {
 // OpenAI Responses API DTOs (Codex)
 // ---------------------------------------------------------------------------
 
+type CodexTool struct {
+	Type        string          `json:"type"` // "function"
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
 type CodexResponsePayload struct {
 	Model        string            `json:"model"`
-	Input        []CodexMessage    `json:"input,omitempty"`
+	Input        []any             `json:"input,omitempty"`
 	Instructions string            `json:"instructions,omitempty"`
-	Stream       bool              `json:"stream,omitempty"`
-	Tools        []OpenAITool      `json:"tools,omitempty"`
+	Stream       *bool             `json:"stream,omitempty"`
+	Store        *bool             `json:"store,omitempty"`
+	Tools        []CodexTool       `json:"tools,omitempty"`
 	Output       []CodexOutputItem `json:"output,omitempty"`
+	Status       string            `json:"status,omitempty"`
+	Usage        *CodexUsage       `json:"usage,omitempty"`
+}
+
+type CodexUsage struct {
+	InputTokens        int                 `json:"input_tokens"`
+	OutputTokens       int                 `json:"output_tokens"`
+	InputTokensDetails *InputTokensDetails `json:"input_tokens_details,omitempty"`
+}
+
+type InputTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
 }
 
 type CodexMessage struct {
@@ -456,10 +699,24 @@ type CodexContentBlock struct {
 
 // TranslateAnthropicToResponses translates an Anthropic Messages request to OpenAI Responses request format.
 func TranslateAnthropicToResponses(src *AnthropicRequest) *CodexResponsePayload {
+	storeVal := false
 	dst := &CodexResponsePayload{
 		Model:  src.Model,
-		Stream: src.Stream,
-		Tools:  TranslateAnthropicToOpenAI(src).Tools,
+		Stream: &src.Stream,
+		Store:  &storeVal,
+	}
+
+	for _, tool := range src.Tools {
+		params := tool.InputSchema
+		if len(params) == 0 {
+			params = json.RawMessage(`{"type": "object", "properties": {}}`)
+		}
+		dst.Tools = append(dst.Tools, CodexTool{
+			Type:        "function",
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  params,
+		})
 	}
 
 	if src.System != nil {
@@ -469,43 +726,202 @@ func TranslateAnthropicToResponses(src *AnthropicRequest) *CodexResponsePayload 
 		}
 	}
 
+	var inputItems []any
+
 	for _, msg := range src.Messages {
-		dst.Input = append(dst.Input, CodexMessage{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
+		role := msg.Role
+		var textParts []any
+
+		for _, block := range msg.Content {
+			switch block.Type {
+			case "text":
+				typ := "input_text"
+				if role == "assistant" {
+					typ = "output_text"
+				}
+				textParts = append(textParts, map[string]any{
+					"type": typ,
+					"text": block.Text,
+				})
+
+			case "image":
+				mime := block.Source.MediaType
+				if mime == "" {
+					mime = "image/png"
+				}
+				data := block.Source.Data
+				var imageURL string
+				if strings.HasPrefix(data, "data:") {
+					imageURL = data
+				} else {
+					imageURL = fmt.Sprintf("data:%s;base64,%s", mime, data)
+				}
+				textParts = append(textParts, map[string]any{
+					"type":      "input_image",
+					"image_url": imageURL,
+				})
+
+			case "tool_use":
+				if len(textParts) > 0 {
+					inputItems = append(inputItems, map[string]any{
+						"role":    role,
+						"content": textParts,
+					})
+					textParts = nil
+				}
+				inputItems = append(inputItems, map[string]any{
+					"type":      "function_call",
+					"call_id":   block.ID,
+					"name":      block.Name,
+					"arguments": string(block.Input),
+				})
+
+			case "tool_result":
+				if len(textParts) > 0 {
+					inputItems = append(inputItems, map[string]any{
+						"role":    role,
+						"content": textParts,
+					})
+					textParts = nil
+				}
+				var outStr string
+				if block.Content != nil {
+					outStr = stringifyToolResultContent(block.Content)
+				} else {
+					outStr = block.Text
+				}
+				inputItems = append(inputItems, map[string]any{
+					"type":    "function_call_output",
+					"call_id": block.ToolUseID,
+					"output":  outStr,
+				})
+			}
+		}
+
+		if len(textParts) > 0 {
+			inputItems = append(inputItems, map[string]any{
+				"role":    role,
+				"content": textParts,
+			})
+		}
 	}
+	dst.Input = inputItems
 
 	return dst
+}
+
+func stringifyToolResultContent(content any) string {
+	if content == nil {
+		return ""
+	}
+	switch val := content.(type) {
+	case string:
+		return val
+	case []any:
+		var parts []string
+		for _, cVal := range val {
+			if cMap, ok := cVal.(map[string]any); ok {
+				if cText, ok := cMap["text"].(string); ok {
+					parts = append(parts, cText)
+				} else {
+					b, _ := json.Marshal(cMap)
+					parts = append(parts, string(b))
+				}
+			} else {
+				parts = append(parts, fmt.Sprint(cVal))
+			}
+		}
+		return strings.Join(parts, "")
+	case []AnthropicContent:
+		var parts []string
+		for _, c := range val {
+			if c.Type == "text" {
+				parts = append(parts, c.Text)
+			} else {
+				b, _ := json.Marshal(c)
+				parts = append(parts, string(b))
+			}
+		}
+		return strings.Join(parts, "")
+	default:
+		return fmt.Sprint(val)
+	}
 }
 
 // TranslateResponsesToAnthropicMessage converts a Codex Responses API payload back to Anthropic response.
 func TranslateResponsesToAnthropicMessage(src *CodexResponsePayload, model string) *AnthropicResponse {
 	dst := &AnthropicResponse{
-		ID:    "resp-" + uuid.New().String(),
-		Type:  "message",
-		Role:  "assistant",
-		Model: model,
+		ID:           "msg_" + strings.ReplaceAll(uuid.New().String(), "-", ""),
+		Type:         "message",
+		Role:         "assistant",
+		Model:        model,
+		StopReason:   "end_turn",
+		StopSequence: "",
 	}
 
 	for _, out := range src.Output {
-		switch out.Type {
-		case "message":
-			for _, block := range out.Content {
-				if block.Type == "output_text" {
-					dst.Content = append(dst.Content, AnthropicContent{
-						Type: "text",
-						Text: block.Text,
-					})
+		if out.Type == "reasoning" {
+			var parts []string
+			for _, s := range out.Summary {
+				if s.Type == "summary_text" {
+					parts = append(parts, s.Text)
 				}
 			}
-		case "function_call":
+			t := strings.Join(parts, "")
+			if t != "" {
+				dst.Content = append(dst.Content, AnthropicContent{
+					Type:     "thinking",
+					Thinking: t,
+				})
+			}
+		} else if out.Type == "message" {
+			var parts []string
+			for _, c := range out.Content {
+				if c.Type == "output_text" {
+					parts = append(parts, c.Text)
+				}
+			}
+			t := strings.Join(parts, "")
+			if t != "" {
+				dst.Content = append(dst.Content, AnthropicContent{
+					Type: "text",
+					Text: t,
+				})
+			}
+		} else if out.Type == "function_call" {
 			dst.Content = append(dst.Content, AnthropicContent{
 				Type:  "tool_use",
 				ID:    out.CallID,
 				Name:  out.Name,
 				Input: json.RawMessage(out.Arguments),
 			})
+		}
+	}
+
+	hasToolUse := false
+	for _, c := range dst.Content {
+		if c.Type == "tool_use" {
+			hasToolUse = true
+			break
+		}
+	}
+
+	if src.Status == "incomplete" {
+		dst.StopReason = "max_tokens"
+	} else if hasToolUse {
+		dst.StopReason = "tool_use"
+	}
+
+	if src.Usage != nil {
+		cached := 0
+		if src.Usage.InputTokensDetails != nil {
+			cached = src.Usage.InputTokensDetails.CachedTokens
+		}
+		dst.Usage = AnthropicUsage{
+			InputTokens:              src.Usage.InputTokens,
+			OutputTokens:             src.Usage.OutputTokens,
+			CacheCreationInputTokens: cached,
+			CacheReadInputTokens:     cached,
 		}
 	}
 
@@ -528,6 +944,13 @@ func TranslateOpenAIChunkToAnthropic(chunk *OpenAIStreamChunk) ([]string, string
 	if choice.Delta.Content != "" {
 		eventData := fmt.Sprintf(`{"type": "content_block_delta", "index": %d, "delta": {"type": "text_delta", "text": %s}}`,
 			choice.Index, stringifyJSON(choice.Delta.Content))
+		events = append(events, "content_block_delta", eventData)
+	}
+
+	// Check if there is reasoning content (thinking)
+	if choice.Delta.ReasoningContent != "" {
+		eventData := fmt.Sprintf(`{"type": "content_block_delta", "index": %d, "delta": {"type": "thinking_delta", "thinking": %s}}`,
+			choice.Index, stringifyJSON(choice.Delta.ReasoningContent))
 		events = append(events, "content_block_delta", eventData)
 	}
 
@@ -576,6 +999,9 @@ func TranslateAnthropicSSEToOpenAI(event string, data string, chatID string, mod
 			if txt, ok := dMap["text"].(string); ok {
 				delta["content"] = txt
 			}
+			if thinking, ok := dMap["thinking"].(string); ok {
+				delta["reasoning_content"] = thinking
+			}
 			if pJson, ok := dMap["partial_json"].(string); ok {
 				// Tool call delta format mapping
 				idxVal, _ := payload["index"].(float64)
@@ -591,18 +1017,20 @@ func TranslateAnthropicSSEToOpenAI(event string, data string, chatID string, mod
 		}
 	case "content_block_start":
 		block, _ := payload["content_block"].(map[string]any)
-		if block != nil && block["type"] == "tool_use" {
-			idxVal, _ := payload["index"].(float64)
-			delta["tool_calls"] = []any{
-				map[string]any{
-					"index": int(idxVal),
-					"id":    block["id"],
-					"type":  "function",
-					"function": map[string]any{
-						"name":      block["name"],
-						"arguments": "",
+		if block != nil {
+			if block["type"] == "tool_use" {
+				idxVal, _ := payload["index"].(float64)
+				delta["tool_calls"] = []any{
+					map[string]any{
+						"index": int(idxVal),
+						"id":    block["id"],
+						"type":  "function",
+						"function": map[string]any{
+							"name":      block["name"],
+							"arguments": "",
+						},
 					},
-				},
+				}
 			}
 		}
 	case "message_delta":
