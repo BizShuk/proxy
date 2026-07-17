@@ -147,8 +147,13 @@ func task5AnthropicInput(messages []anthropic.Message) ([]responses.InputItem, [
 	var items []responses.InputItem
 	var losses []protocol.SemanticLoss
 	for _, message := range messages {
-		if message.Role != "user" && message.Role != "assistant" {
-			return nil, nil, task5Unsupported("unsupported_role", "Responses cannot reproduce the Anthropic message role")
+		switch message.Role {
+		case "user", "assistant", "system", "developer":
+		default:
+			return nil, nil, task5Unsupported(
+				"unsupported_role",
+				fmt.Sprintf("Responses cannot reproduce Anthropic message role %q", message.Role),
+			)
 		}
 		var content responses.ContentList
 		flush := func() {

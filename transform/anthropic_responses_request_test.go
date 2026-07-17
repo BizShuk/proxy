@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/bizshuk/proxy/protocol"
+	"github.com/bizshuk/proxy/protocol/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,6 +56,33 @@ func TestAnthropicResponsesRequestTransforms(t *testing.T) {
 			assert.NotEmpty(t, got.Losses)
 		})
 	}
+}
+
+func TestAnthropicToResponsesPreservesInstructionMessageRoles(t *testing.T) {
+	body := []byte(`{
+		"model":"openai/gpt-5.5",
+		"messages":[
+			{"role":"system","content":"system policy"},
+			{"role":"developer","content":[{"type":"text","text":"developer policy"}]},
+			{"role":"user","content":"hello"}
+		]
+	}`)
+
+	result, err := AnthropicToResponsesRequest(context.Background(), protocol.RequestEnvelope{
+		Model: "gpt-5.5", Stream: true, Body: body,
+	})
+	require.NoError(t, err)
+
+	request, err := responses.DecodeRequest(result.Body)
+	require.NoError(t, err)
+	items, err := responses.DecodeInput(request.Input)
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.Equal(t, "system", items[0].Role)
+	assert.Equal(t, responses.ContentList{{Type: "input_text", Text: "system policy"}}, items[0].Content)
+	assert.Equal(t, "developer", items[1].Role)
+	assert.Equal(t, responses.ContentList{{Type: "input_text", Text: "developer policy"}}, items[1].Content)
+	assert.Equal(t, "user", items[2].Role)
 }
 
 func TestResponsesToAnthropicRejectsPreviousResponseWithoutHistory(t *testing.T) {
