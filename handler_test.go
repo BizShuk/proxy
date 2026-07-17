@@ -763,6 +763,16 @@ func TestRequestIDRejectsASCIIControlCharacters(t *testing.T) {
 	assert.Equal(t, "valid-request", requestID(" valid-request "))
 }
 
+func TestAcceptsEventStreamWithoutContentTypeOnlyWhenProfileAllowsIt(t *testing.T) {
+	ordinary := upstream.Profile{}
+	codex := upstream.Profile{AllowsMissingStreamContentType: true}
+
+	assert.False(t, acceptsEventStream(ordinary, ""))
+	assert.True(t, acceptsEventStream(codex, ""))
+	assert.True(t, acceptsEventStream(ordinary, "text/event-stream; charset=utf-8"))
+	assert.False(t, acceptsEventStream(codex, "application/json"))
+}
+
 func newHandlerDeps(t *testing.T, httpClient *http.Client) HandlerDeps {
 	t.Helper()
 	catalog, err := upstream.DefaultCatalog()

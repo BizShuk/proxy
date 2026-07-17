@@ -46,19 +46,20 @@ type NormalizeRequest func(protocol.RequestEnvelope) (NormalizedRequest, error)
 
 // Profile describes one concrete upstream API surface.
 type Profile struct {
-	ID                     string
-	Routing                route.Profile
-	CredentialProvider     string
-	BaseURL                string
-	Endpoints              map[protocol.Format]string
-	Preferred              protocol.Format
-	AuthScheme             AuthScheme
-	AllowedRequestHeaders  []string
-	AllowedResponseHeaders []string
-	AdvertisedModels       []string
-	AnthropicVersion       string
-	CountTokensEndpoint    string
-	NormalizeRequest       NormalizeRequest
+	ID                             string
+	Routing                        route.Profile
+	CredentialProvider             string
+	BaseURL                        string
+	Endpoints                      map[protocol.Format]string
+	Preferred                      protocol.Format
+	AuthScheme                     AuthScheme
+	AllowedRequestHeaders          []string
+	AllowedResponseHeaders         []string
+	AdvertisedModels               []string
+	AnthropicVersion               string
+	CountTokensEndpoint            string
+	AllowsMissingStreamContentType bool
+	NormalizeRequest               NormalizeRequest
 }
 
 // ResolveEndpoint returns the fixed endpoint for a supported format.
@@ -248,17 +249,18 @@ func DefaultCatalog() (*Catalog, error) {
 			NormalizeRequest:       preserveRequest,
 		},
 		{
-			ID:                     "openai-codex-oauth",
-			Routing:                route.Profile{ID: "openai", Qualifiers: []string{"openai", "openai-chat"}, Prefixes: []string{"gpt-", "o1-", "o3-"}},
-			CredentialProvider:     "openai",
-			BaseURL:                "https://chatgpt.com/backend-api",
-			Endpoints:              map[protocol.Format]string{protocol.FORMAT_OPENAI_RESPONSES: "/codex/responses"},
-			Preferred:              protocol.FORMAT_OPENAI_RESPONSES,
-			AuthScheme:             AUTH_BEARER,
-			AllowedRequestHeaders:  slices.Clone(defaultRequestHeaders),
-			AllowedResponseHeaders: slices.Clone(defaultResponseHeaders),
-			AdvertisedModels:       []string{"gpt-", "o1-", "o3-"},
-			NormalizeRequest:       normalizeCodexRequest,
+			ID:                             "openai-codex-oauth",
+			Routing:                        route.Profile{ID: "openai", Qualifiers: []string{"openai", "openai-chat"}, Prefixes: []string{"gpt-", "o1-", "o3-"}},
+			CredentialProvider:             "openai",
+			BaseURL:                        "https://chatgpt.com/backend-api",
+			Endpoints:                      map[protocol.Format]string{protocol.FORMAT_OPENAI_RESPONSES: "/codex/responses"},
+			Preferred:                      protocol.FORMAT_OPENAI_RESPONSES,
+			AuthScheme:                     AUTH_BEARER,
+			AllowedRequestHeaders:          slices.Clone(defaultRequestHeaders),
+			AllowedResponseHeaders:         slices.Clone(defaultResponseHeaders),
+			AdvertisedModels:               []string{"gpt-", "o1-", "o3-"},
+			AllowsMissingStreamContentType: true,
+			NormalizeRequest:               normalizeCodexRequest,
 		},
 		{
 			ID:                 "xai",

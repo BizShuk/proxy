@@ -18,10 +18,11 @@ func TestDefaultCatalogCapabilities(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		id        string
-		preferred protocol.Format
-		baseURL   string
-		endpoints map[protocol.Format]string
+		id                             string
+		preferred                      protocol.Format
+		baseURL                        string
+		endpoints                      map[protocol.Format]string
+		allowsMissingStreamContentType bool
 	}{
 		{
 			id: "anthropic", preferred: protocol.FORMAT_ANTHROPIC_MESSAGES,
@@ -43,8 +44,9 @@ func TestDefaultCatalogCapabilities(t *testing.T) {
 		},
 		{
 			id: "openai-codex-oauth", preferred: protocol.FORMAT_OPENAI_RESPONSES,
-			baseURL:   "https://chatgpt.com/backend-api",
-			endpoints: map[protocol.Format]string{protocol.FORMAT_OPENAI_RESPONSES: "/codex/responses"},
+			baseURL:                        "https://chatgpt.com/backend-api",
+			endpoints:                      map[protocol.Format]string{protocol.FORMAT_OPENAI_RESPONSES: "/codex/responses"},
+			allowsMissingStreamContentType: true,
 		},
 		{
 			id: "xai", preferred: protocol.FORMAT_OPENAI_RESPONSES,
@@ -63,6 +65,7 @@ func TestDefaultCatalogCapabilities(t *testing.T) {
 			assert.Equal(t, tc.preferred, profile.Preferred)
 			assert.Equal(t, tc.baseURL, profile.BaseURL)
 			assert.Equal(t, tc.endpoints, profile.Endpoints)
+			assert.Equal(t, tc.allowsMissingStreamContentType, profile.AllowsMissingStreamContentType)
 		})
 	}
 }

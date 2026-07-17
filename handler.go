@@ -315,7 +315,7 @@ func (h *Handler) handleStream(
 	exchange protocol.Exchange,
 	response *http.Response,
 ) {
-	if !isEventStream(response.Header.Get("Content-Type")) {
+	if !acceptsEventStream(profile, response.Header.Get("Content-Type")) {
 		h.writeError(c, source, protocolStreamError("upstream did not return an event stream", nil))
 		return
 	}
@@ -431,7 +431,7 @@ func (h *Handler) handleBridge(
 	exchange protocol.Exchange,
 	response *http.Response,
 ) {
-	if !isEventStream(response.Header.Get("Content-Type")) {
+	if !acceptsEventStream(profile, response.Header.Get("Content-Type")) {
 		h.writeError(c, source, protocolStreamError("upstream did not return an event stream", nil))
 		return
 	}
@@ -589,6 +589,13 @@ func containsASCIIControl(value string) bool {
 func isEventStream(contentType string) bool {
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	return err == nil && strings.EqualFold(mediaType, "text/event-stream")
+}
+
+func acceptsEventStream(profile upstream.Profile, contentType string) bool {
+	if isEventStream(contentType) {
+		return true
+	}
+	return strings.TrimSpace(contentType) == "" && profile.AllowsMissingStreamContentType
 }
 
 func copySafeResponseHeaders(target, source http.Header, profile upstream.Profile) {
