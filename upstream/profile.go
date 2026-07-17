@@ -300,9 +300,16 @@ func normalizeCodexRequest(envelope protocol.RequestEnvelope) (NormalizedRequest
 	if err := json.Unmarshal(envelope.Body, &body); err != nil {
 		return NormalizedRequest{}, invalidRequestError("normalize Codex request", err)
 	}
+	instructions, input, lifted, err := liftCodexInstructionMessages(request)
+	if err != nil {
+		return NormalizedRequest{}, invalidRequestError("normalize Codex instructions", err)
+	}
+	if lifted {
+		body["input"] = input
+	}
 	body["stream"] = true
 	body["store"] = false
-	body["instructions"] = request.Instructions
+	body["instructions"] = instructions
 	normalizedBody, err := json.Marshal(body)
 	if err != nil {
 		return NormalizedRequest{}, fmt.Errorf("normalize Codex request: %w", err)
@@ -312,6 +319,51 @@ func normalizeCodexRequest(envelope protocol.RequestEnvelope) (NormalizedRequest
 		UpstreamStream:    true,
 		BridgeToNonStream: !envelope.Stream,
 	}, nil
+}
+
+func liftCodexInstructionMessages(request *responses.Request) (string, []responses.InputItem, bool, error) {
+	items, err := responses.DecodeInput(request.Input)
+	if err != nil {
+		return "", nil, false, err
+	}
+
+	instructions := make([]string, 0, 3)
+	if request.Instructions != "" {
+		instructions = append(instructions, request.Instructions)
+	}
+	input := make([]responses.InputItem, 0, len(items))
+	lifted := false
+	for index, item := range items {
+		if item.Role != "system" && item.Role != "developer" {
+			input = append(input, item)
+			continue
+		}
+		if item.Type != "" && item.Type != "message" {
+			return "", nil, false, fmt.Errorf("input[%d] instruction role requires a message item", index)
+		}
+		text, err := codexInstructionText(item.Content)
+		if err != nil {
+			return "", nil, false, fmt.Errorf("input[%d]: %w", index, err)
+		}
+		if text != "" {
+			instructions = append(instructions, text)
+		}
+		lifted = true
+	}
+	return strings.Join(instructions, "\n\n"), input, lifted, nil
+}
+
+func codexInstructionText(content responses.ContentList) (string, error) {
+	var text strings.Builder
+	for index, part := range content {
+		switch part.Type {
+		case "input_text", "output_text":
+			text.WriteString(part.Text)
+		default:
+			return "", fmt.Errorf("instruction content[%d] type %q is unsupported", index, part.Type)
+		}
+	}
+	return text.String(), nil
 }
 
 func normalizeXAIRequest(envelope protocol.RequestEnvelope) (NormalizedRequest, error) {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/bizshuk/agentsdk/auth"
 	"github.com/bizshuk/proxy/protocol"
+	"github.com/bizshuk/proxy/protocol/responses"
 	"github.com/bizshuk/proxy/route"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -136,6 +137,39 @@ func TestCodexNormalizerMarksNonStreamBridge(t *testing.T) {
 			assert.Equal(t, "", got["instructions"])
 		})
 	}
+}
+
+func TestCodexNormalizerLiftsInstructionMessages(t *testing.T) {
+	catalog, err := DefaultCatalog()
+	require.NoError(t, err)
+	profile, ok := catalog.Lookup("openai-codex-oauth")
+	require.True(t, ok)
+
+	body := []byte(`{
+		"model":"gpt-5.5",
+		"instructions":"top-level policy",
+		"input":[
+			{"type":"message","role":"system","content":[{"type":"input_text","text":"system policy"}]},
+			{"type":"message","role":"developer","content":[{"type":"input_text","text":"developer policy"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
+		],
+		"stream":true
+	}`)
+	normalized, err := profile.NormalizeRequest(protocol.RequestEnvelope{
+		TargetFormat: protocol.FORMAT_OPENAI_RESPONSES,
+		Stream:       true,
+		Body:         body,
+	})
+	require.NoError(t, err)
+
+	request, err := responses.DecodeRequest(normalized.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "top-level policy\n\nsystem policy\n\ndeveloper policy", request.Instructions)
+	items, err := responses.DecodeInput(request.Input)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "user", items[0].Role)
+	assert.Equal(t, "hello", items[0].Content[0].Text)
 }
 
 func TestProfileHeaderAllowlistCannotAdmitSensitiveHeaders(t *testing.T) {
