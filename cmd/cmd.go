@@ -9,12 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/bizshuk/proxy/proxy"
+	pxconfig "github.com/bizshuk/proxy/config"
+	"github.com/bizshuk/proxy/handlers"
 	"github.com/spf13/cobra"
 )
 
 // NewCommand returns the `proxy` command. It is self-contained: settings come
-// from proxy.LoadConfig (gosdk layered viper under the agentSDK namespace).
+// from pxconfig.LoadConfig (gosdk layered viper under the agentSDK namespace).
 func NewCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "proxy",
@@ -26,7 +27,7 @@ func NewCommand() *cobra.Command {
 }
 
 func run() error {
-	cfg, err := proxy.LoadConfig()
+	cfg, err := pxconfig.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -34,7 +35,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	server, err := proxy.New(cfg)
+	server, err := handlers.New(cfg)
 	if err != nil {
 		return fmt.Errorf("create proxy server: %w", err)
 	}
