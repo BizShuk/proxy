@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/bizshuk/agentsdk/auth"
-	"github.com/bizshuk/agentsdk/config"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/bizshuk/proxy/protocol/anthropic"
 	"github.com/bizshuk/proxy/protocol/chat"
@@ -296,7 +295,7 @@ func newHandlerForCredentialWithLimit(t *testing.T, credential *auth.Credential,
 	require.NoError(t, err)
 	require.NoError(t, store.Save(credential))
 	credentials := upstream.NewCredentialResolver(store, nil, func(string) (string, bool) { return "", false })
-	client, err := upstream.NewClient(httpClient, config.ProxyTimeoutConfig{
+	client, err := upstream.NewClient(httpClient, upstream.TimeoutConfig{
 		MessagesMs: 1000, StreamMessagesMs: 1000, CountTokensMs: 1000,
 	})
 	require.NoError(t, err)
@@ -787,7 +786,7 @@ func newHandlerDeps(t *testing.T, httpClient *http.Client) HandlerDeps {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	client, err := upstream.NewClient(httpClient, config.ProxyTimeoutConfig{
+	client, err := upstream.NewClient(httpClient, upstream.TimeoutConfig{
 		MessagesMs: 1000, StreamMessagesMs: 1000, CountTokensMs: 1000,
 	})
 	require.NoError(t, err)

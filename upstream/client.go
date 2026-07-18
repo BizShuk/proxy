@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/bizshuk/agentsdk/auth"
-	"github.com/bizshuk/agentsdk/config"
 	"github.com/bizshuk/proxy/protocol"
 )
 
@@ -27,7 +26,7 @@ type Client struct {
 }
 
 // NewClient clones an injected HTTP client and applies proxy timeout policy.
-func NewClient(httpClient *http.Client, cfg config.ProxyTimeoutConfig) (*Client, error) {
+func NewClient(httpClient *http.Client, cfg TimeoutConfig) (*Client, error) {
 	if httpClient == nil {
 		return nil, fmt.Errorf("upstream client: nil HTTP client")
 	}

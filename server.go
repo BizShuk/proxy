@@ -16,7 +16,6 @@ import (
 
 	"github.com/bizshuk/agentsdk/auth"
 	"github.com/bizshuk/agentsdk/auth/provider"
-	"github.com/bizshuk/agentsdk/config"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/bizshuk/proxy/transform"
 	"github.com/bizshuk/proxy/upstream"
@@ -37,13 +36,13 @@ const (
 
 // Server holds the assembled engine and its runtime config.
 type Server struct {
-	cfg     *config.ProxyConfig
+	cfg     *Config
 	engine  *gin.Engine
 	handler *Handler
 }
 
 // New builds the engine with the full middleware stack and route table.
-func New(cfg *config.ProxyConfig) (*Server, error) {
+func New(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("new proxy server: config is required")
 	}

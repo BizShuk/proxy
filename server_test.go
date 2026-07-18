@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bizshuk/agentsdk/config"
+	"github.com/bizshuk/proxy/upstream"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -57,10 +57,10 @@ func TestNewHTTPServerUsesStreamingSafeTimeouts(t *testing.T) {
 	assert.Zero(t, server.WriteTimeout)
 }
 
-func testProxyConfig(t *testing.T) *config.ProxyConfig {
+func testProxyConfig(t *testing.T) *Config {
 	t.Helper()
-	return &config.ProxyConfig{
+	return &Config{
 		AuthDir: t.TempDir(), APIKeys: []string{"proxy-test-key"}, BodyLimit: 1,
-		Timeouts: config.ProxyTimeoutConfig{MessagesMs: 1000, StreamMessagesMs: 1000, CountTokensMs: 1000},
+		Timeouts: upstream.TimeoutConfig{MessagesMs: 1000, StreamMessagesMs: 1000, CountTokensMs: 1000},
 	}
 }

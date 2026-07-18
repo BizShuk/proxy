@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/bizshuk/agentsdk/auth"
-	"github.com/bizshuk/agentsdk/config"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,13 +23,13 @@ func TestNewClientValidatesDependenciesAndClonesTransport(t *testing.T) {
 	tests := []struct {
 		name    string
 		client  *http.Client
-		cfg     config.ProxyTimeoutConfig
+		cfg     TimeoutConfig
 		wantErr bool
 	}{
 		{name: "nil client", cfg: validTimeouts, wantErr: true},
-		{name: "zero messages timeout", client: http.DefaultClient, cfg: config.ProxyTimeoutConfig{StreamMessagesMs: 1, CountTokensMs: 1}, wantErr: true},
-		{name: "zero stream timeout", client: http.DefaultClient, cfg: config.ProxyTimeoutConfig{MessagesMs: 1, CountTokensMs: 1}, wantErr: true},
-		{name: "zero count timeout", client: http.DefaultClient, cfg: config.ProxyTimeoutConfig{MessagesMs: 1, StreamMessagesMs: 1}, wantErr: true},
+		{name: "zero messages timeout", client: http.DefaultClient, cfg: TimeoutConfig{StreamMessagesMs: 1, CountTokensMs: 1}, wantErr: true},
+		{name: "zero stream timeout", client: http.DefaultClient, cfg: TimeoutConfig{MessagesMs: 1, CountTokensMs: 1}, wantErr: true},
+		{name: "zero count timeout", client: http.DefaultClient, cfg: TimeoutConfig{MessagesMs: 1, StreamMessagesMs: 1}, wantErr: true},
 		{name: "valid", client: http.DefaultClient, cfg: validTimeouts},
 	}
 	for _, tc := range tests {
@@ -498,8 +497,8 @@ func testXAIProfile(baseURL string) Profile {
 	return profile
 }
 
-func timeoutConfig() config.ProxyTimeoutConfig {
-	return config.ProxyTimeoutConfig{
+func timeoutConfig() TimeoutConfig {
+	return TimeoutConfig{
 		MessagesMs: 2000, StreamMessagesMs: 5000, CountTokensMs: 2000,
 	}
 }
