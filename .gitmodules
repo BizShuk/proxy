@@ -1,0 +1,6 @@
+[submodule "tmp/auth2api"]
+	path = tmp/auth2api
+	url = https://github.com/AmazingAng/auth2api
+[submodule "tmp/CLIProxyAPI"]
+	path = tmp/CLIProxyAPI
+	url = https://github.com/router-for-me/CLIProxyAPI

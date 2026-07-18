@@ -1,2 +1,7 @@
 # Compiled proxy binary from `go run .` / `go build .`
 /proxy
+
+# Allow vendored/reference repos under tmp despite global tmp/ ignore.
+!/tmp/
+!/tmp/auth2api/
+!/tmp/CLIProxyAPI/
