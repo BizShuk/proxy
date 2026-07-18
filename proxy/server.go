@@ -14,7 +14,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/bizshuk/agentsdk/auth/auth"
+	"github.com/bizshuk/agentsdk/auth/model"
+	utils "github.com/bizshuk/agentsdk/auth/utils"
 	"github.com/bizshuk/agentsdk/auth/provider"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/bizshuk/proxy/transform"
@@ -49,11 +50,11 @@ func New(cfg *Config) (*Server, error) {
 	if cfg.BodyLimit <= 0 || int64(cfg.BodyLimit) > MAX_BODY_LIMIT_MB {
 		return nil, fmt.Errorf("new proxy server: body limit must be between 1 and %d MB", MAX_BODY_LIMIT_MB)
 	}
-	store, err := auth.NewFileStore(cfg.AuthDir)
+	store, err := utils.NewFileStore(cfg.AuthDir)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server credential store: %w", err)
 	}
-	credentials := upstream.NewCredentialResolver(store, func(credential *auth.Credential) (auth.Authenticator, error) {
+	credentials := upstream.NewCredentialResolver(store, func(credential *model.Credential) (model.Authenticator, error) {
 		return provider.For(credential)
 	}, os.LookupEnv)
 	catalog, err := upstream.DefaultCatalog()

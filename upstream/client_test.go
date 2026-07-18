@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bizshuk/agentsdk/auth/auth"
+	"github.com/bizshuk/agentsdk/auth/model"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,19 +78,19 @@ func TestClientDoNeverFollowsRedirects(t *testing.T) {
 		name       string
 		profileID  string
 		target     protocol.Format
-		credential *auth.Credential
+		credential *model.Credential
 	}{
 		{
 			name:       "Authorization",
 			profileID:  "xai",
 			target:     protocol.FORMAT_OPENAI_RESPONSES,
-			credential: &auth.Credential{Provider: "xai", Kind: auth.KIND_API_KEY, APIKey: "secret"},
+			credential: &model.Credential{Provider: "xai", Kind: model.KIND_API_KEY, APIKey: "secret"},
 		},
 		{
 			name:       "x-api-key",
 			profileID:  "anthropic",
 			target:     protocol.FORMAT_ANTHROPIC_MESSAGES,
-			credential: &auth.Credential{Provider: "anthropic", Kind: auth.KIND_API_KEY, APIKey: "secret"},
+			credential: &model.Credential{Provider: "anthropic", Kind: model.KIND_API_KEY, APIKey: "secret"},
 		},
 	}
 	for _, redirect := range redirects {
@@ -155,7 +155,7 @@ func TestClientDoUsesProfileEndpointAndSanitizedHeaders(t *testing.T) {
 	profile := testXAIProfile(server.URL)
 	client, err := NewClient(server.Client(), timeoutConfig())
 	require.NoError(t, err)
-	resp, err := client.Do(context.Background(), profile, &auth.Credential{Provider: "xai", Kind: auth.KIND_API_KEY, APIKey: "secret"}, protocol.RequestEnvelope{
+	resp, err := client.Do(context.Background(), profile, &model.Credential{Provider: "xai", Kind: model.KIND_API_KEY, APIKey: "secret"}, protocol.RequestEnvelope{
 		TargetFormat: protocol.FORMAT_OPENAI_RESPONSES,
 		Headers: http.Header{
 			"x-request-id":              {"req_client"},
@@ -181,16 +181,16 @@ func TestClientDoJoinsBasePathAndAllowsCredentialOverride(t *testing.T) {
 	require.NoError(t, err)
 	profile := defaultProfile(t, "minimax")
 	profile.BaseURL = server.URL + "/anthropic"
-	resp, err := client.Do(context.Background(), profile, &auth.Credential{
-		Provider: "minimax", Kind: auth.KIND_API_KEY, APIKey: "secret",
+	resp, err := client.Do(context.Background(), profile, &model.Credential{
+		Provider: "minimax", Kind: model.KIND_API_KEY, APIKey: "secret",
 	}, protocol.RequestEnvelope{TargetFormat: protocol.FORMAT_ANTHROPIC_MESSAGES, Body: []byte(`{}`)})
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	assert.Equal(t, "/anthropic/v1/messages", <-paths)
 
 	profile.BaseURL = "https://unused.example.com/base"
-	resp, err = client.Do(context.Background(), profile, &auth.Credential{
-		Provider: "minimax", Kind: auth.KIND_API_KEY, APIKey: "secret", BaseURL: server.URL + "/gateway",
+	resp, err = client.Do(context.Background(), profile, &model.Credential{
+		Provider: "minimax", Kind: model.KIND_API_KEY, APIKey: "secret", BaseURL: server.URL + "/gateway",
 	}, protocol.RequestEnvelope{TargetFormat: protocol.FORMAT_ANTHROPIC_MESSAGES, Body: []byte(`{}`)})
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
@@ -215,8 +215,8 @@ func TestClientDoRejectsUnsafeBaseURLs(t *testing.T) {
 	for _, rawURL := range tests {
 		t.Run(rawURL, func(t *testing.T) {
 			profile.BaseURL = rawURL
-			_, err := client.Do(context.Background(), profile, &auth.Credential{
-				Provider: "xai", Kind: auth.KIND_API_KEY, APIKey: "secret",
+			_, err := client.Do(context.Background(), profile, &model.Credential{
+				Provider: "xai", Kind: model.KIND_API_KEY, APIKey: "secret",
 			}, protocol.RequestEnvelope{TargetFormat: protocol.FORMAT_OPENAI_RESPONSES, Body: []byte(`{}`)})
 			var proxyErr *protocol.ProxyError
 			require.ErrorAs(t, err, &proxyErr)
@@ -229,7 +229,7 @@ func TestClientDoAppliesProviderSpecificHeaders(t *testing.T) {
 	tests := []struct {
 		name       string
 		profileID  string
-		credential *auth.Credential
+		credential *model.Credential
 		target     protocol.Format
 		stream     bool
 		headers    http.Header
@@ -237,7 +237,7 @@ func TestClientDoAppliesProviderSpecificHeaders(t *testing.T) {
 	}{
 		{
 			name: "Anthropic API key", profileID: "anthropic", target: protocol.FORMAT_ANTHROPIC_MESSAGES,
-			credential: &auth.Credential{Provider: "anthropic", Kind: auth.KIND_API_KEY, APIKey: "anthropic-key"},
+			credential: &model.Credential{Provider: "anthropic", Kind: model.KIND_API_KEY, APIKey: "anthropic-key"},
 			assert: func(t *testing.T, header http.Header) {
 				assert.Equal(t, "anthropic-key", header.Get("x-api-key"))
 				assert.Empty(t, header.Get("Authorization"))
@@ -246,7 +246,7 @@ func TestClientDoAppliesProviderSpecificHeaders(t *testing.T) {
 		},
 		{
 			name: "Anthropic OAuth", profileID: "anthropic", target: protocol.FORMAT_ANTHROPIC_MESSAGES, stream: true,
-			credential: &auth.Credential{Provider: "anthropic", Kind: auth.KIND_OAUTH, AccessToken: "anthropic-token"},
+			credential: &model.Credential{Provider: "anthropic", Kind: model.KIND_OAUTH, AccessToken: "anthropic-token"},
 			headers:    http.Header{"anthropic-beta": {"tools-2024-04-04", ANTHROPIC_OAUTH_BETA + ", tools-2024-04-04"}},
 			assert: func(t *testing.T, header http.Header) {
 				assert.Equal(t, "Bearer anthropic-token", header.Get("Authorization"))
@@ -258,7 +258,7 @@ func TestClientDoAppliesProviderSpecificHeaders(t *testing.T) {
 		},
 		{
 			name: "MiniMax", profileID: "minimax", target: protocol.FORMAT_ANTHROPIC_MESSAGES,
-			credential: &auth.Credential{Provider: "minimax", Kind: auth.KIND_API_KEY, APIKey: "minimax-key"},
+			credential: &model.Credential{Provider: "minimax", Kind: model.KIND_API_KEY, APIKey: "minimax-key"},
 			assert: func(t *testing.T, header http.Header) {
 				assert.Equal(t, "minimax-key", header.Get("x-api-key"))
 				assert.Empty(t, header.Get("Authorization"))
@@ -266,14 +266,14 @@ func TestClientDoAppliesProviderSpecificHeaders(t *testing.T) {
 		},
 		{
 			name: "OpenAI API", profileID: "openai-api", target: protocol.FORMAT_OPENAI_RESPONSES,
-			credential: &auth.Credential{Provider: "openai", Kind: auth.KIND_API_KEY, APIKey: "openai-key"},
+			credential: &model.Credential{Provider: "openai", Kind: model.KIND_API_KEY, APIKey: "openai-key"},
 			assert: func(t *testing.T, header http.Header) {
 				assert.Equal(t, "Bearer openai-key", header.Get("Authorization"))
 			},
 		},
 		{
 			name: "Codex OAuth", profileID: "openai-codex-oauth", target: protocol.FORMAT_OPENAI_RESPONSES, stream: true,
-			credential: &auth.Credential{Provider: "openai", Kind: auth.KIND_OAUTH, AccessToken: "codex-token", AccountID: "acct-uuid"},
+			credential: &model.Credential{Provider: "openai", Kind: model.KIND_OAUTH, AccessToken: "codex-token", AccountID: "acct-uuid"},
 			assert: func(t *testing.T, header http.Header) {
 				assert.Equal(t, "Bearer codex-token", header.Get("Authorization"))
 				assert.Equal(t, "acct-uuid", header.Get("ChatGPT-Account-ID"))
@@ -284,7 +284,7 @@ func TestClientDoAppliesProviderSpecificHeaders(t *testing.T) {
 		},
 		{
 			name: "xAI", profileID: "xai", target: protocol.FORMAT_OPENAI_RESPONSES,
-			credential: &auth.Credential{Provider: "xai", Kind: auth.KIND_API_KEY, APIKey: "xai-key"},
+			credential: &model.Credential{Provider: "xai", Kind: model.KIND_API_KEY, APIKey: "xai-key"},
 			assert: func(t *testing.T, header http.Header) {
 				assert.Equal(t, "Bearer xai-key", header.Get("Authorization"))
 			},
@@ -326,8 +326,8 @@ func TestClientDoOmitsEmptyCodexAccountID(t *testing.T) {
 	client, err := NewClient(server.Client(), timeoutConfig())
 	require.NoError(t, err)
 
-	resp, err := client.Do(context.Background(), profile, &auth.Credential{
-		Provider: "openai", Kind: auth.KIND_OAUTH, AccessToken: "token",
+	resp, err := client.Do(context.Background(), profile, &model.Credential{
+		Provider: "openai", Kind: model.KIND_OAUTH, AccessToken: "token",
 	}, protocol.RequestEnvelope{TargetFormat: protocol.FORMAT_OPENAI_RESPONSES, Stream: true, Body: []byte(`{}`)})
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
@@ -364,8 +364,8 @@ func TestClientDoUsesRequestTimeoutAndCancelsOnBodyClose(t *testing.T) {
 			require.NoError(t, err)
 			profile := defaultProfile(t, "xai")
 
-			resp, err := client.Do(context.Background(), profile, &auth.Credential{
-				Provider: "xai", Kind: auth.KIND_API_KEY, APIKey: "secret",
+			resp, err := client.Do(context.Background(), profile, &model.Credential{
+				Provider: "xai", Kind: model.KIND_API_KEY, APIKey: "secret",
 			}, protocol.RequestEnvelope{TargetFormat: protocol.FORMAT_OPENAI_RESPONSES, Stream: tc.stream, Body: []byte(`{}`)})
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
@@ -391,8 +391,8 @@ func TestClientDoPropagatesCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
-		_, err := client.Do(ctx, profile, &auth.Credential{
-			Provider: "xai", Kind: auth.KIND_API_KEY, APIKey: "secret",
+		_, err := client.Do(ctx, profile, &model.Credential{
+			Provider: "xai", Kind: model.KIND_API_KEY, APIKey: "secret",
 		}, protocol.RequestEnvelope{TargetFormat: protocol.FORMAT_OPENAI_RESPONSES, Body: []byte(`{}`)})
 		result <- err
 	}()
@@ -426,8 +426,8 @@ func TestClientDoMapsTransportFailures(t *testing.T) {
 				return nil, tc.err
 			})}, timeoutConfig())
 			require.NoError(t, err)
-			_, err = client.Do(context.Background(), defaultProfile(t, "xai"), &auth.Credential{
-				Provider: "xai", Kind: auth.KIND_API_KEY, APIKey: "secret",
+			_, err = client.Do(context.Background(), defaultProfile(t, "xai"), &model.Credential{
+				Provider: "xai", Kind: model.KIND_API_KEY, APIKey: "secret",
 			}, protocol.RequestEnvelope{TargetFormat: protocol.FORMAT_OPENAI_RESPONSES, Body: []byte(`{}`)})
 			var proxyErr *protocol.ProxyError
 			require.ErrorAs(t, err, &proxyErr)
@@ -459,8 +459,8 @@ func TestClientCountTokensUsesNativeEndpointAndTimeout(t *testing.T) {
 	profile := defaultProfile(t, "anthropic")
 	profile.BaseURL = "https://api.example.com"
 
-	resp, err := client.CountTokens(context.Background(), profile, &auth.Credential{
-		Provider: "anthropic", Kind: auth.KIND_API_KEY, APIKey: "anthropic-key",
+	resp, err := client.CountTokens(context.Background(), profile, &model.Credential{
+		Provider: "anthropic", Kind: model.KIND_API_KEY, APIKey: "anthropic-key",
 	}, protocol.RequestEnvelope{TargetFormat: protocol.FORMAT_ANTHROPIC_MESSAGES, Body: []byte(`{"model":"claude-3-5-sonnet-latest","messages":[]}`)})
 	require.NoError(t, err)
 	deadline, ok := capturedContext.Deadline()
@@ -475,8 +475,8 @@ func TestClientCountTokensRejectsUnsupportedProfile(t *testing.T) {
 	client, err := NewClient(http.DefaultClient, timeoutConfig())
 	require.NoError(t, err)
 
-	_, err = client.CountTokens(context.Background(), defaultProfile(t, "xai"), &auth.Credential{
-		Provider: "xai", Kind: auth.KIND_API_KEY, APIKey: "secret",
+	_, err = client.CountTokens(context.Background(), defaultProfile(t, "xai"), &model.Credential{
+		Provider: "xai", Kind: model.KIND_API_KEY, APIKey: "secret",
 	}, protocol.RequestEnvelope{TargetFormat: protocol.FORMAT_OPENAI_RESPONSES, Body: []byte(`{}`)})
 	var proxyErr *protocol.ProxyError
 	require.ErrorAs(t, err, &proxyErr)

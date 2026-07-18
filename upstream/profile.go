@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/bizshuk/agentsdk/auth/auth"
+	"github.com/bizshuk/agentsdk/auth/model"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/bizshuk/proxy/protocol/chat"
 	"github.com/bizshuk/proxy/protocol/responses"
@@ -166,14 +166,14 @@ func (c *Catalog) NewRouter() (*route.Router, error) {
 }
 
 // ResolveProfile selects a concrete API profile and validates the target format.
-func (c *Catalog) ResolveProfile(providerFamily string, credentialKind auth.Kind, forcedTarget *protocol.Format) (Profile, protocol.Format, error) {
+func (c *Catalog) ResolveProfile(providerFamily string, credentialKind model.Kind, forcedTarget *protocol.Format) (Profile, protocol.Format, error) {
 	family := strings.ToLower(strings.TrimSpace(providerFamily))
 	profileID := family
 	if family == "openai" {
 		switch credentialKind {
-		case auth.KIND_API_KEY:
+		case model.KIND_API_KEY:
 			profileID = "openai-api"
-		case auth.KIND_OAUTH:
+		case model.KIND_OAUTH:
 			profileID = "openai-codex-oauth"
 		default:
 			return Profile{}, "", unsupportedCredentialError(family, credentialKind)
@@ -513,7 +513,7 @@ func unsupportedFormatError(profileID string, format protocol.Format) error {
 	}
 }
 
-func unsupportedCredentialError(providerFamily string, credentialKind auth.Kind) error {
+func unsupportedCredentialError(providerFamily string, credentialKind model.Kind) error {
 	return &protocol.ProxyError{
 		Kind:    protocol.ERROR_AUTH,
 		Status:  http.StatusUnauthorized,

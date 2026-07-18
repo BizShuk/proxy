@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bizshuk/agentsdk/auth/auth"
+	"github.com/bizshuk/agentsdk/auth/model"
 	"github.com/bizshuk/proxy/protocol"
 )
 
@@ -66,7 +66,7 @@ func NewClient(httpClient *http.Client, cfg TimeoutConfig) (*Client, error) {
 }
 
 // Do sends one model request to the endpoint selected by the target format.
-func (c *Client) Do(ctx context.Context, profile Profile, cred *auth.Credential, envelope protocol.RequestEnvelope) (*http.Response, error) {
+func (c *Client) Do(ctx context.Context, profile Profile, cred *model.Credential, envelope protocol.RequestEnvelope) (*http.Response, error) {
 	endpoint, err := profile.ResolveEndpoint(envelope.TargetFormat)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (c *Client) Do(ctx context.Context, profile Profile, cred *auth.Credential,
 }
 
 // CountTokens sends one request to a profile's native token-count endpoint.
-func (c *Client) CountTokens(ctx context.Context, profile Profile, cred *auth.Credential, envelope protocol.RequestEnvelope) (*http.Response, error) {
+func (c *Client) CountTokens(ctx context.Context, profile Profile, cred *model.Credential, envelope protocol.RequestEnvelope) (*http.Response, error) {
 	if strings.TrimSpace(profile.CountTokensEndpoint) == "" {
 		return nil, &protocol.ProxyError{
 			Kind:    protocol.ERROR_UNSUPPORTED_FEATURE,
@@ -94,7 +94,7 @@ func (c *Client) CountTokens(ctx context.Context, profile Profile, cred *auth.Cr
 func (c *Client) do(
 	ctx context.Context,
 	profile Profile,
-	cred *auth.Credential,
+	cred *model.Credential,
 	envelope protocol.RequestEnvelope,
 	endpoint string,
 	timeout time.Duration,
@@ -175,7 +175,7 @@ func loopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func validateCredentialForProfile(profile Profile, cred *auth.Credential) error {
+func validateCredentialForProfile(profile Profile, cred *model.Credential) error {
 	if cred == nil {
 		return authProxyError("upstream credential is nil", nil)
 	}
@@ -199,13 +199,13 @@ func forwardAllowlistedHeaders(profile Profile, source, target http.Header) {
 	}
 }
 
-func applyProviderHeaders(profile Profile, cred *auth.Credential, header http.Header) {
+func applyProviderHeaders(profile Profile, cred *model.Credential, header http.Header) {
 	secret := cred.APIKey
-	if cred.Kind == auth.KIND_OAUTH {
+	if cred.Kind == model.KIND_OAUTH {
 		secret = cred.AccessToken
 	}
 
-	if strings.EqualFold(profile.CredentialProvider, "anthropic") && cred.Kind == auth.KIND_OAUTH {
+	if strings.EqualFold(profile.CredentialProvider, "anthropic") && cred.Kind == model.KIND_OAUTH {
 		header.Set("Authorization", "Bearer "+secret)
 		header.Set("anthropic-dangerous-direct-browser-access", "true")
 		ensureCommaSeparatedHeader(header, "anthropic-beta", ANTHROPIC_OAUTH_BETA)

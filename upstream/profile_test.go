@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/bizshuk/agentsdk/auth/auth"
+	"github.com/bizshuk/agentsdk/auth/model"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/bizshuk/proxy/protocol/responses"
 	"github.com/bizshuk/proxy/route"
@@ -77,19 +77,19 @@ func TestCatalogResolveProfile(t *testing.T) {
 	tests := []struct {
 		name          string
 		family        string
-		kind          auth.Kind
+		kind          model.Kind
 		forced        *protocol.Format
 		wantID        string
 		wantTarget    protocol.Format
 		wantErrorKind protocol.ErrorKind
 	}{
-		{name: "OpenAI API defaults Responses", family: "openai", kind: auth.KIND_API_KEY, wantID: "openai-api", wantTarget: protocol.FORMAT_OPENAI_RESPONSES},
-		{name: "OpenAI API forced Chat", family: "OPENAI", kind: auth.KIND_API_KEY, forced: profileFormatPtr(protocol.FORMAT_OPENAI_CHAT), wantID: "openai-api", wantTarget: protocol.FORMAT_OPENAI_CHAT},
-		{name: "OpenAI OAuth uses Codex", family: "openai", kind: auth.KIND_OAUTH, wantID: "openai-codex-oauth", wantTarget: protocol.FORMAT_OPENAI_RESPONSES},
-		{name: "OpenAI OAuth rejects Chat", family: "openai", kind: auth.KIND_OAUTH, forced: profileFormatPtr(protocol.FORMAT_OPENAI_CHAT), wantErrorKind: protocol.ERROR_UNSUPPORTED_FEATURE},
-		{name: "xAI defaults Responses", family: "xai", kind: auth.KIND_API_KEY, wantID: "xai", wantTarget: protocol.FORMAT_OPENAI_RESPONSES},
-		{name: "xAI forced Chat", family: "xai", kind: auth.KIND_API_KEY, forced: profileFormatPtr(protocol.FORMAT_OPENAI_CHAT), wantID: "xai", wantTarget: protocol.FORMAT_OPENAI_CHAT},
-		{name: "unknown family", family: "unknown", kind: auth.KIND_API_KEY, wantErrorKind: protocol.ERROR_UNKNOWN_MODEL},
+		{name: "OpenAI API defaults Responses", family: "openai", kind: model.KIND_API_KEY, wantID: "openai-api", wantTarget: protocol.FORMAT_OPENAI_RESPONSES},
+		{name: "OpenAI API forced Chat", family: "OPENAI", kind: model.KIND_API_KEY, forced: profileFormatPtr(protocol.FORMAT_OPENAI_CHAT), wantID: "openai-api", wantTarget: protocol.FORMAT_OPENAI_CHAT},
+		{name: "OpenAI OAuth uses Codex", family: "openai", kind: model.KIND_OAUTH, wantID: "openai-codex-oauth", wantTarget: protocol.FORMAT_OPENAI_RESPONSES},
+		{name: "OpenAI OAuth rejects Chat", family: "openai", kind: model.KIND_OAUTH, forced: profileFormatPtr(protocol.FORMAT_OPENAI_CHAT), wantErrorKind: protocol.ERROR_UNSUPPORTED_FEATURE},
+		{name: "xAI defaults Responses", family: "xai", kind: model.KIND_API_KEY, wantID: "xai", wantTarget: protocol.FORMAT_OPENAI_RESPONSES},
+		{name: "xAI forced Chat", family: "xai", kind: model.KIND_API_KEY, forced: profileFormatPtr(protocol.FORMAT_OPENAI_CHAT), wantID: "xai", wantTarget: protocol.FORMAT_OPENAI_CHAT},
+		{name: "unknown family", family: "unknown", kind: model.KIND_API_KEY, wantErrorKind: protocol.ERROR_UNKNOWN_MODEL},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

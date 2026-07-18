@@ -14,7 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bizshuk/agentsdk/auth/auth"
+	"github.com/bizshuk/agentsdk/auth/model"
+	utils "github.com/bizshuk/agentsdk/auth/utils"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/bizshuk/proxy/protocol/anthropic"
 	"github.com/bizshuk/proxy/protocol/chat"
@@ -33,7 +34,7 @@ type recordingObserver struct {
 
 type handlerProviderCase struct {
 	name           string
-	credential     *auth.Credential
+	credential     *model.Credential
 	qualifiedModel string
 	wantPath       string
 	wantModel      string
@@ -109,7 +110,7 @@ func TestHandlerRoutesAllProviderAndSourceCombinationsNonStream(t *testing.T) {
 				if providerCase.name == "openai codex oauth" {
 					assert.True(t, bodyStream(t, upstreamCall.body))
 				}
-				if providerCase.credential.Kind == auth.KIND_OAUTH || providerCase.credential.Provider == "openai" || providerCase.credential.Provider == "xai" {
+				if providerCase.credential.Kind == model.KIND_OAUTH || providerCase.credential.Provider == "openai" || providerCase.credential.Provider == "xai" {
 					assert.NotEmpty(t, upstreamCall.authorization)
 				} else {
 					assert.NotEmpty(t, upstreamCall.apiKey)
@@ -169,13 +170,13 @@ func handlerProviderCases(baseURL string) []handlerProviderCase {
 	}
 }
 
-func apiKeyCred(provider, baseURL string) *auth.Credential {
-	return &auth.Credential{Provider: provider, Kind: auth.KIND_API_KEY, APIKey: "test-api-key", BaseURL: baseURL}
+func apiKeyCred(provider, baseURL string) *model.Credential {
+	return &model.Credential{Provider: provider, Kind: model.KIND_API_KEY, APIKey: "test-api-key", BaseURL: baseURL}
 }
 
-func oauthCred(provider, baseURL string) *auth.Credential {
-	return &auth.Credential{
-		Provider: provider, Kind: auth.KIND_OAUTH, AccessToken: "test-access-token",
+func oauthCred(provider, baseURL string) *model.Credential {
+	return &model.Credential{
+		Provider: provider, Kind: model.KIND_OAUTH, AccessToken: "test-access-token",
 		RefreshToken: "test-refresh-token", ExpiresAt: time.Now().Add(time.Hour), BaseURL: baseURL,
 	}
 }
@@ -279,11 +280,11 @@ func assertTerminalSSE(t *testing.T, format protocol.Format, body []byte) {
 	}
 }
 
-func newHandlerForCredential(t *testing.T, credential *auth.Credential, httpClient *http.Client) *Handler {
+func newHandlerForCredential(t *testing.T, credential *model.Credential, httpClient *http.Client) *Handler {
 	return newHandlerForCredentialWithLimit(t, credential, httpClient, 1<<20)
 }
 
-func newHandlerForCredentialWithLimit(t *testing.T, credential *auth.Credential, httpClient *http.Client, limit int64) *Handler {
+func newHandlerForCredentialWithLimit(t *testing.T, credential *model.Credential, httpClient *http.Client, limit int64) *Handler {
 	t.Helper()
 	catalog, err := upstream.DefaultCatalog()
 	require.NoError(t, err)
@@ -291,7 +292,7 @@ func newHandlerForCredentialWithLimit(t *testing.T, credential *auth.Credential,
 	require.NoError(t, err)
 	registry, err := transform.NewDefaultRegistry()
 	require.NoError(t, err)
-	store, err := auth.NewFileStore(t.TempDir())
+	store, err := utils.NewFileStore(t.TempDir())
 	require.NoError(t, err)
 	require.NoError(t, store.Save(credential))
 	credentials := upstream.NewCredentialResolver(store, nil, func(string) (string, bool) { return "", false })
@@ -780,7 +781,7 @@ func newHandlerDeps(t *testing.T, httpClient *http.Client) HandlerDeps {
 	require.NoError(t, err)
 	registry, err := transform.NewDefaultRegistry()
 	require.NoError(t, err)
-	store, err := auth.NewFileStore(t.TempDir())
+	store, err := utils.NewFileStore(t.TempDir())
 	require.NoError(t, err)
 	credentials := upstream.NewCredentialResolver(store, nil, func(string) (string, bool) { return "", false })
 	if httpClient == nil {
