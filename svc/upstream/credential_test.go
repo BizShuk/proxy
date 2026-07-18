@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	authmodel "github.com/bizshuk/agentsdk/auth/model"
+	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/proxy/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

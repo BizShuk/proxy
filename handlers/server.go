@@ -14,9 +14,9 @@ import (
 	"os"
 	"time"
 
-	authmodel "github.com/bizshuk/agentsdk/auth/model"
-	"github.com/bizshuk/agentsdk/auth/provider"
-	utils "github.com/bizshuk/agentsdk/auth/utils"
+	authmodel "github.com/bizshuk/auth/model"
+	"github.com/bizshuk/auth/provider"
+	utils "github.com/bizshuk/auth/utils"
 	pxconfig "github.com/bizshuk/proxy/config"
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/svc/transform"

@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	authmodel "github.com/bizshuk/agentsdk/auth/model"
-	utils "github.com/bizshuk/agentsdk/auth/utils"
+	authmodel "github.com/bizshuk/auth/model"
+	utils "github.com/bizshuk/auth/utils"
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/model/anthropic"
 	"github.com/bizshuk/proxy/model/chat"

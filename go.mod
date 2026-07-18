@@ -3,7 +3,7 @@ module github.com/bizshuk/proxy
 go 1.26.0
 
 require (
-	github.com/bizshuk/agentsdk/auth v0.0.0
+	github.com/bizshuk/auth v0.0.0
 	github.com/bizshuk/gosdk v1.1.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/google/uuid v1.6.0
@@ -69,4 +69,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/bizshuk/agentsdk/auth => ../auth
+replace github.com/bizshuk/auth => ../auth

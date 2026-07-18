@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	authmodel "github.com/bizshuk/agentsdk/auth/model"
-	svc "github.com/bizshuk/agentsdk/auth/svc"
+	authmodel "github.com/bizshuk/auth/model"
+	svc "github.com/bizshuk/auth/svc"
 	"github.com/bizshuk/proxy/model"
 )
 

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	authmodel "github.com/bizshuk/agentsdk/auth/model"
+	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/model/responses"
 	"github.com/bizshuk/proxy/svc/route"

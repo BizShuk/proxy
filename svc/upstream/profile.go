@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	authmodel "github.com/bizshuk/agentsdk/auth/model"
+	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/model/chat"
 	"github.com/bizshuk/proxy/model/responses"
