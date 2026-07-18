@@ -1,0 +1,2 @@
+# Compiled proxy binary from `go run .` / `go build .`
+/proxy

@@ -1,5 +1,7 @@
 github.com/DATA-DOG/go-sqlmock v1.5.0 h1:Shsta01QNfFxHCfpW6YH2STWB0MudeXXEWMr20OEh60=
 github.com/DATA-DOG/go-sqlmock v1.5.0/go.mod h1:f/Ixk793poVmq4qj/V1dPUg2JEAKC73Q5eFN3EC/SaM=
+github.com/bizshuk/auth v0.0.0-20260718180648-a05ed97812a8 h1:80suva1sBCKtTbinOHDekR0BmfEs7yDlqhikwv97j80=
+github.com/bizshuk/auth v0.0.0-20260718180648-a05ed97812a8/go.mod h1:TuHLNypNLWPIhxQbrG7wKaht6KMUyGCwsuoUJMKPSGM=
 github.com/bizshuk/gosdk v1.1.0 h1:OqWje5VO2PEhFlFvLN0H9F6Rreq8Pu83iuvQhFITCJQ=
 github.com/bizshuk/gosdk v1.1.0/go.mod h1:/8NUA9abjxoaeQ7SPUiY6CL4xV4/2pgELF1bLcQBErI=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
