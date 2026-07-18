@@ -4,9 +4,10 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"os"
 
+	_ "github.com/bizshuk/gosdk/log"
 	"github.com/bizshuk/proxy/cmd"
 )
 
@@ -16,7 +17,7 @@ func main() {
 	root.SilenceUsage = true
 	root.SilenceErrors = true
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+		slog.Error("command failed", "error", err)
 		os.Exit(1)
 	}
 }
