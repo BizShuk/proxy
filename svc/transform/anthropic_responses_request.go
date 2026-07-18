@@ -57,6 +57,10 @@ func AnthropicToResponsesRequest(ctx context.Context, env model.RequestEnvelope)
 		ToolChoice:   toolChoice,
 		Reasoning:    task5ResponsesReasoning(src.Thinking),
 	}
+	if src.MaxTokens != 0 {
+		maxTokens := src.MaxTokens
+		dst.MaxOutputTokens = &maxTokens
+	}
 	body, err := responses.Encode(dst)
 	if err != nil {
 		return model.TransformResult{}, fmt.Errorf("encode responses request: %w", err)
@@ -118,6 +122,9 @@ func ResponsesToAnthropicRequest(ctx context.Context, env model.RequestEnvelope)
 		Tools:      tools,
 		ToolChoice: toolChoice,
 		Thinking:   thinking,
+	}
+	if src.MaxOutputTokens != nil {
+		dst.MaxTokens = *src.MaxOutputTokens
 	}
 	body, err := anthropic.Encode(dst)
 	if err != nil {
@@ -323,9 +330,6 @@ func task5AnthropicRequestLosses(request *anthropic.Request) []model.SemanticLos
 	}
 	if request.TopP != nil {
 		losses = append(losses, model.SemanticLoss{Field: "top_p", Reason: "Responses request DTO does not expose top_p"})
-	}
-	if request.MaxTokens != 0 {
-		losses = append(losses, model.SemanticLoss{Field: "max_tokens", Reason: "Responses request DTO does not expose max output tokens"})
 	}
 	if len(request.StopSequences) > 0 {
 		losses = append(losses, model.SemanticLoss{Field: "stop_sequences", Reason: "Responses request DTO does not expose stop sequences"})

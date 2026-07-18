@@ -1,0 +1,103 @@
+# 工具呼叫循環 (Tool Call Cycle)
+
+`方向`：provider tool call → client tool call → client tool result → provider tool result。
+
+## 1. Provider send: tool call
+
+`unsupported`
+
+## 2. Client receive: tool call
+
+```json
+{
+  "id": "chat_1",
+  "object": "chat.completion",
+  "created": 1,
+  "model": "client-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "read",
+              "arguments": "{\"path\":\"a.txt\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 5,
+    "completion_tokens": 4,
+    "total_tokens": 9
+  }
+}
+```
+
+## 3. Client send: tool result
+
+```json
+{
+  "model": "client-model",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\":\"a.txt\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "name": "read",
+      "content": "ok"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read",
+        "description": "Read a file",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+## 4. Provider receive: tool result
+
+`unsupported`
+
+## Support
+
+- `unsupported`：`auth2api` Cursor decoder/encoder 只處理 reasoning/text delta；source README 也明列 tool calls 尚未翻譯。
+- `arguments` 在 OpenAI formats 是 JSON string；Anthropic/Gemini/Interactions 使用 JSON object。
+

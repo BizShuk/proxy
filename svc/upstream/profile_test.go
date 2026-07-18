@@ -175,6 +175,35 @@ func TestCodexNormalizerLiftsInstructionMessages(t *testing.T) {
 	assert.Equal(t, "hello", items[0].Content[0].Text)
 }
 
+func TestCodexNormalizerStripsMaxOutputTokens(t *testing.T) {
+	catalog, err := DefaultCatalog()
+	require.NoError(t, err)
+	profile, ok := catalog.Lookup("openai-codex-oauth")
+	require.True(t, ok)
+
+	body := []byte(`{
+		"model":"gpt-5.5",
+		"max_output_tokens":512,
+		"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],
+		"stream":true
+	}`)
+	normalized, err := profile.NormalizeRequest(model.RequestEnvelope{
+		TargetFormat: model.FORMAT_OPENAI_RESPONSES,
+		Stream:       true,
+		Body:         body,
+	})
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(normalized.Body, &got))
+	_, present := got["max_output_tokens"]
+	assert.False(t, present, "Codex normalizer must strip max_output_tokens before forwarding to /codex/responses")
+
+	request, err := responses.DecodeRequest(normalized.Body)
+	require.NoError(t, err)
+	assert.Nil(t, request.MaxOutputTokens, "Codex normalizer must leave the decoded Responses MaxOutputTokens nil")
+}
+
 func TestProfileHeaderAllowlistCannotAdmitSensitiveHeaders(t *testing.T) {
 	profile := Profile{
 		AllowedRequestHeaders: []string{

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/bizshuk/proxy/model"
+	"github.com/bizshuk/proxy/model/anthropic"
 	"github.com/bizshuk/proxy/model/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -136,4 +137,60 @@ func TestTask5ErrorsPreserveJSONSyntaxCause(t *testing.T) {
 	_, err := ResponsesToAnthropicRequest(context.Background(), model.RequestEnvelope{Model: "target", Body: []byte(`{`)})
 	var syntaxErr *json.SyntaxError
 	require.ErrorAs(t, err, &syntaxErr)
+}
+
+func TestAnthropicToResponsesMapsMaxTokensToMaxOutputTokens(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-source",
+		"max_tokens":512,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]
+	}`)
+
+	result, err := AnthropicToResponsesRequest(context.Background(), model.RequestEnvelope{
+		Model: "gpt-5.5", Stream: true, Body: body,
+	})
+	require.NoError(t, err)
+
+	request, err := responses.DecodeRequest(result.Body)
+	require.NoError(t, err)
+	require.NotNil(t, request.MaxOutputTokens)
+	assert.Equal(t, 512, *request.MaxOutputTokens)
+
+	for _, loss := range result.Losses {
+		assert.NotEqualf(t, "max_tokens", loss.Field,
+			"max_tokens must not be reported as a loss after mapping is in place; got loss=%+v", loss)
+	}
+}
+
+func TestAnthropicToResponsesOmitsMaxOutputTokensWhenAbsent(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-source",
+		"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]
+	}`)
+
+	result, err := AnthropicToResponsesRequest(context.Background(), model.RequestEnvelope{
+		Model: "gpt-5.5", Stream: true, Body: body,
+	})
+	require.NoError(t, err)
+
+	request, err := responses.DecodeRequest(result.Body)
+	require.NoError(t, err)
+	assert.Nil(t, request.MaxOutputTokens)
+}
+
+func TestResponsesToAnthropicMapsMaxOutputTokensToMaxTokens(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-source",
+		"max_output_tokens":256,
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}]
+	}`)
+
+	result, err := ResponsesToAnthropicRequest(context.Background(), model.RequestEnvelope{
+		Model: "claude", Body: body,
+	})
+	require.NoError(t, err)
+
+	request, err := anthropic.DecodeRequest(result.Body)
+	require.NoError(t, err)
+	assert.Equal(t, 256, request.MaxTokens)
 }

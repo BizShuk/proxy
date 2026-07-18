@@ -309,6 +309,9 @@ func normalizeCodexRequest(envelope model.RequestEnvelope) (NormalizedRequest, e
 	if lifted {
 		body["input"] = input
 	}
+	// The Codex /codex/responses endpoint rejects max_output_tokens; strip it before
+	// forwarding so Anthropic-side max_tokens can flow through other providers safely.
+	delete(body, "max_output_tokens")
 	body["stream"] = true
 	body["store"] = false
 	body["instructions"] = instructions

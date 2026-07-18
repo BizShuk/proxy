@@ -78,6 +78,7 @@ type Request struct {
 	Input              json.RawMessage `json:"input"`
 	Instructions       string          `json:"instructions,omitempty"`
 	PreviousResponseID string          `json:"previous_response_id,omitempty"`
+	MaxOutputTokens    *int            `json:"max_output_tokens,omitempty"`
 	Stream             *bool           `json:"stream,omitempty"`
 	Store              *bool           `json:"store,omitempty"`
 	Tools              []Tool          `json:"tools,omitempty"`
