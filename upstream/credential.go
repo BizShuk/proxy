@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/bizshuk/agentsdk/auth"
+	"github.com/bizshuk/agentsdk/auth/auth"
 	"github.com/bizshuk/proxy/protocol"
 )
 

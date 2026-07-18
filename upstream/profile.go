@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/bizshuk/agentsdk/auth"
+	"github.com/bizshuk/agentsdk/auth/auth"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/bizshuk/proxy/protocol/chat"
 	"github.com/bizshuk/proxy/protocol/responses"

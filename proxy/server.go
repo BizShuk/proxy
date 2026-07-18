@@ -14,7 +14,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/bizshuk/agentsdk/auth"
+	"github.com/bizshuk/agentsdk/auth/auth"
 	"github.com/bizshuk/agentsdk/auth/provider"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/bizshuk/proxy/transform"
@@ -72,7 +72,7 @@ func New(cfg *Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server upstream client: %w", err)
 	}
-	observer, err := NewTransformObserver(slog.Default(), otel.Meter("github.com/bizshuk/proxy"))
+	observer, err := NewTransformObserver(slog.Default(), otel.Meter("github.com/bizshuk/proxy/proxy"))
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server observer: %w", err)
 	}

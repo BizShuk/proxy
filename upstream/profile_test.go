@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/bizshuk/agentsdk/auth"
+	"github.com/bizshuk/agentsdk/auth/auth"
 	"github.com/bizshuk/proxy/protocol"
 	"github.com/bizshuk/proxy/protocol/responses"
 	"github.com/bizshuk/proxy/route"
