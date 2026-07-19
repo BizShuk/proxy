@@ -283,6 +283,20 @@ func DefaultCatalog() (*Catalog, error) {
 			AdvertisedModels:       []string{"grok-"},
 			NormalizeRequest:       normalizeXAIRequest,
 		},
+		{
+			ID:                 "google",
+			Routing:            route.Profile{ID: "google", Qualifiers: []string{"google", "google-chat"}, Prefixes: []string{"gemini-", "gemma-", "imagen-"}},
+			CredentialProvider: "google",
+			BaseURL:            "https://generativelanguage.googleapis.com/v1beta/openai",
+			Endpoints:          map[model.Format]string{model.FORMAT_OPENAI_CHAT: "/chat/completions"},
+			Preferred:          model.FORMAT_OPENAI_CHAT,
+			AuthScheme:         AUTH_BEARER,
+			AllowedRequestHeaders: append(slices.Clone(defaultRequestHeaders),
+				"x-goog-api-key"),
+			AllowedResponseHeaders: slices.Clone(defaultResponseHeaders),
+			AdvertisedModels:       []string{"gemini-", "gemma-", "imagen-"},
+			NormalizeRequest:       preserveRequest,
+		},
 	}
 	return NewCatalog(profiles)
 }

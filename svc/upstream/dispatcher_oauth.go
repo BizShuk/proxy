@@ -33,6 +33,7 @@ import (
 	"github.com/bizshuk/proxy/providers/antigravity"
 	"github.com/bizshuk/proxy/providers/anthropic"
 	"github.com/bizshuk/proxy/providers/codex"
+	"github.com/bizshuk/proxy/providers/google"
 	"github.com/bizshuk/proxy/providers/grok"
 	"github.com/bizshuk/proxy/providers/minimax"
 	"github.com/bizshuk/proxy/providers/ollama"
@@ -83,6 +84,8 @@ func buildAPIKeyProvider(cred *authmodel.Credential) (core.Provider, error) {
 		return ollama.New(ollama.WithAPIKey(cred.APIKey))
 	case "minimax":
 		return minimax.New(minimax.WithAPIKey(cred.APIKey))
+	case "google":
+		return google.New(google.WithAPIKey(cred.APIKey))
 	default:
 		return nil, fmt.Errorf("build provider: no api_key path for family %q", cred.Provider)
 	}
@@ -207,11 +210,16 @@ func NewDispatcherWithAuthAndEnv(resolver *svc.Resolver) (*Dispatcher, error) {
 			_ = d.Set(p)
 		}
 	}
+	if _, ok := d.Lookup("google"); !ok {
+		if p, err := google.New(); err == nil {
+			_ = d.Set(p)
+		}
+	}
 	return d, nil
 }
 
 func familiesInDefaultOrder() []string {
-	return []string{"anthropic", "codex", "antigravity", "grok", "ollama", "minimax"}
+	return []string{"anthropic", "codex", "antigravity", "grok", "ollama", "minimax", "google"}
 }
 
 func newDispatcherWithAuth(resolver *svc.Resolver, families []string) (*Dispatcher, error) {

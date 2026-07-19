@@ -627,7 +627,7 @@ func TestHandlerModelsUsesCatalog(t *testing.T) {
 	for _, item := range payload.Data {
 		models = append(models, item.ID)
 	}
-	assert.Equal(t, []string{"MiniMax-Text-01", "claude-", "gpt-", "grok-", "minimax-", "o1-", "o3-"}, models)
+	assert.Equal(t, []string{"MiniMax-Text-01", "claude-", "gemini-", "gemma-", "gpt-", "grok-", "imagen-", "minimax-", "o1-", "o3-"}, models)
 }
 
 func TestHandlerCountTokensUsesNativeAnthropicCapability(t *testing.T) {

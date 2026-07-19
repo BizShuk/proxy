@@ -17,19 +17,20 @@ import (
 	"github.com/bizshuk/proxy/providers/antigravity"
 	"github.com/bizshuk/proxy/providers/anthropic"
 	"github.com/bizshuk/proxy/providers/codex"
+	"github.com/bizshuk/proxy/providers/google"
 	"github.com/bizshuk/proxy/providers/grok"
 	"github.com/bizshuk/proxy/providers/minimax"
 	"github.com/bizshuk/proxy/providers/ollama"
 )
 
-// NewDefaultDispatcher returns a Dispatcher with the canonical six
+// NewDefaultDispatcher returns a Dispatcher with the canonical seven
 // provider families registered. Providers whose env vars are not set
 // fail their New() call and are skipped — the dispatcher still
 // registers the families that succeed.
 //
 // The order of registration is fixed:
 //
-//	anthropic → ollama → grok → antigravity → codex → minimax
+//	anthropic → ollama → grok → antigravity → codex → minimax → google
 //
 // Order is cosmetic (the dispatcher uses a map), but it makes
 // dispatcher.IDs() deterministic for tests.
@@ -56,6 +57,9 @@ func NewDefaultDispatcher() (*Dispatcher, error) {
 		}},
 		{"minimax", func() (core.Provider, error) {
 			return minimax.New()
+		}},
+		{"google", func() (core.Provider, error) {
+			return google.New()
 		}},
 	}
 	for _, c := range candidates {
