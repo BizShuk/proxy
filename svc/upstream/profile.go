@@ -26,6 +26,11 @@ const (
 	ANTHROPIC_VERSION = "2023-06-01"
 )
 
+var codexResponsesLiteModels = map[string]struct{}{
+	"gpt-5.6":     {},
+	"gpt-5.6-sol": {},
+}
+
 // AuthScheme identifies the provider's default credential header.
 type AuthScheme string
 
@@ -315,6 +320,9 @@ func normalizeCodexRequest(envelope model.RequestEnvelope) (NormalizedRequest, e
 	body["stream"] = true
 	body["store"] = false
 	body["instructions"] = instructions
+	if isCodexResponsesLiteModel(request.Model) {
+		body["parallel_tool_calls"] = false
+	}
 	normalizedBody, err := json.Marshal(body)
 	if err != nil {
 		return NormalizedRequest{}, fmt.Errorf("normalize Codex request: %w", err)
@@ -324,6 +332,11 @@ func normalizeCodexRequest(envelope model.RequestEnvelope) (NormalizedRequest, e
 		UpstreamStream:    true,
 		BridgeToNonStream: !envelope.Stream,
 	}, nil
+}
+
+func isCodexResponsesLiteModel(modelName string) bool {
+	_, ok := codexResponsesLiteModels[strings.ToLower(strings.TrimSpace(modelName))]
+	return ok
 }
 
 func liftCodexInstructionMessages(request *responses.Request) (string, []responses.InputItem, bool, error) {

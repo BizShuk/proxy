@@ -204,6 +204,54 @@ func TestCodexNormalizerStripsMaxOutputTokens(t *testing.T) {
 	assert.Nil(t, request.MaxOutputTokens, "Codex normalizer must leave the decoded Responses MaxOutputTokens nil")
 }
 
+func TestCodexNormalizerDisablesParallelToolCallsForResponsesLiteModel(t *testing.T) {
+	catalog, err := DefaultCatalog()
+	require.NoError(t, err)
+	profile, ok := catalog.Lookup("openai-codex-oauth")
+	require.True(t, ok)
+
+	body := []byte(`{
+		"model":"gpt-5.6-sol",
+		"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],
+		"parallel_tool_calls":true,
+		"stream":true
+	}`)
+	normalized, err := profile.NormalizeRequest(model.RequestEnvelope{
+		TargetFormat: model.FORMAT_OPENAI_RESPONSES,
+		Stream:       true,
+		Body:         body,
+	})
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(normalized.Body, &got))
+	assert.Equal(t, false, got["parallel_tool_calls"])
+}
+
+func TestCodexNormalizerPreservesParallelToolCallsForClassicModel(t *testing.T) {
+	catalog, err := DefaultCatalog()
+	require.NoError(t, err)
+	profile, ok := catalog.Lookup("openai-codex-oauth")
+	require.True(t, ok)
+
+	body := []byte(`{
+		"model":"gpt-5.5",
+		"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],
+		"parallel_tool_calls":true,
+		"stream":true
+	}`)
+	normalized, err := profile.NormalizeRequest(model.RequestEnvelope{
+		TargetFormat: model.FORMAT_OPENAI_RESPONSES,
+		Stream:       true,
+		Body:         body,
+	})
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(normalized.Body, &got))
+	assert.Equal(t, true, got["parallel_tool_calls"])
+}
+
 func TestProfileHeaderAllowlistCannotAdmitSensitiveHeaders(t *testing.T) {
 	profile := Profile{
 		AllowedRequestHeaders: []string{

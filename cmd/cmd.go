@@ -14,30 +14,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const DEFAULT_PORT = 8317
+
 // NewCommand returns the `proxy` command. It is self-contained: settings come
 // from pxconfig.LoadConfig (gosdk layered viper under the agentSDK namespace).
 func NewCommand() *cobra.Command {
-	return &cobra.Command{
+	port := DEFAULT_PORT
+	command := &cobra.Command{
 		Use:   "proxy",
 		Short: "Start the proxy server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return run()
+			cfg, err := pxconfig.LoadConfig()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			cfg.Server.Port = port
+
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+
+			server, err := handlers.New(cfg)
+			if err != nil {
+				return fmt.Errorf("create proxy server: %w", err)
+			}
+			return server.Run(ctx)
 		},
 	}
-}
-
-func run() error {
-	cfg, err := pxconfig.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	server, err := handlers.New(cfg)
-	if err != nil {
-		return fmt.Errorf("create proxy server: %w", err)
-	}
-	return server.Run(ctx)
+	command.PersistentFlags().IntVar(&port, "port", DEFAULT_PORT, "Server port")
+	return command
 }
