@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/bizshuk/proxy/model"
 )
 
 // MAX_UPSTREAM_ERROR_BYTES caps how many bytes of an upstream
@@ -144,6 +146,20 @@ func (h *Handler) logStreamError(
 		}
 	}
 	slog.LogAttrs(ctx, slog.LevelError, "proxy upstream stream error", attrs...)
+}
+
+// routedModelOf extracts the routed model name from an Exchange
+// for use as the `model` attribute on upstream-error logs. Kept
+// here so handler.go does not grow a helper that belongs to the
+// upstream-error logging feature.
+func routedModelOf(exchange model.Exchange) string {
+	return exchange.TranslatedRequest.Model
+}
+
+// providerIDOf extracts the provider id from an Exchange for use
+// as the `provider` attribute on upstream-error logs.
+func providerIDOf(exchange model.Exchange) string {
+	return exchange.ProviderID
 }
 
 // readUpstreamErrorBody drains the response body so callers can

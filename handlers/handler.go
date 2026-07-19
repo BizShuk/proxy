@@ -376,14 +376,20 @@ func (h *Handler) handleStream(
 			break
 		}
 		if decodeErr != nil {
-			h.writeTerminalStreamError(c, source)
+			h.writeTerminalStreamError(c, source,
+				exchange.TranslatedRequest.Headers.Get("x-request-id"),
+				routedModelOf(exchange), providerIDOf(exchange), nil, "sse_decode_error")
 			return
 		}
 		frames, pushErr := stream.Push(c.Request.Context(), frame)
 		if pushErr != nil {
-			if c.Request.Context().Err() == nil {
-				h.writeTerminalStreamError(c, source)
+			cause := "stream_push_error"
+			if c.Request.Context().Err() != nil {
+				cause = "context_canceled"
 			}
+			h.writeTerminalStreamError(c, source,
+				exchange.TranslatedRequest.Headers.Get("x-request-id"),
+				routedModelOf(exchange), providerIDOf(exchange), nil, cause)
 			return
 		}
 		if !writeStreamFrames(c, frames) {
@@ -392,9 +398,13 @@ func (h *Handler) handleStream(
 	}
 	frames, err := stream.Close(c.Request.Context())
 	if err != nil {
-		if c.Request.Context().Err() == nil {
-			h.writeTerminalStreamError(c, source)
+		cause := "stream_close_error"
+		if c.Request.Context().Err() != nil {
+			cause = "context_canceled"
 		}
+		h.writeTerminalStreamError(c, source,
+			exchange.TranslatedRequest.Headers.Get("x-request-id"),
+			routedModelOf(exchange), providerIDOf(exchange), nil, cause)
 		return
 	}
 	_ = writeStreamFrames(c, frames)
@@ -410,7 +420,14 @@ func writeStreamFrames(c *gin.Context, frames []model.SSEFrame) bool {
 	return true
 }
 
-func (h *Handler) writeTerminalStreamError(c *gin.Context, format model.Format) {
+func (h *Handler) writeTerminalStreamError(
+	c *gin.Context,
+	format model.Format,
+	requestIDValue, routedModel, providerID string,
+	response *http.Response,
+	cause string,
+) {
+	h.logStreamError(c.Request.Context(), requestIDValue, routedModel, providerID, response, cause)
 	var frames []model.SSEFrame
 	switch format {
 	case model.FORMAT_ANTHROPIC_MESSAGES:
@@ -467,6 +484,12 @@ func (h *Handler) handleBridge(
 	exchange model.Exchange,
 	response *http.Response,
 ) {
+	if c.Request.Context().Err() != nil {
+		h.logStreamError(c.Request.Context(),
+			exchange.TranslatedRequest.Headers.Get("x-request-id"),
+			exchange.TranslatedRequest.Model, exchange.ProviderID, response, "context_canceled")
+		return
+	}
 	if !acceptsEventStream(profile, response.Header.Get("Content-Type")) {
 		h.writeError(c, source, protocolStreamError("upstream did not return an event stream", nil))
 		return
