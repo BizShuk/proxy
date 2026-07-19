@@ -125,7 +125,10 @@ func TestLogUpstreamError_TruncatesBody(t *testing.T) {
 	body := h.logUpstreamError(context.Background(), "req-3", "gpt-5", "openai", resp)
 
 	require.NotNil(t, body)
-	assert.Equal(t, int(MAX_UPSTREAM_ERROR_BYTES), len(body))
+	// Returned body is uncapped; the caller (handleUpstreamError
+	// → readBounded) is responsible for rejecting oversized
+	// bodies. The log entry still records body_truncated=true.
+	assert.Equal(t, len(big), len(body))
 	entry := decodeLastLog(t, buf)
 	assert.Equal(t, true, entry["body_truncated"])
 	assert.Equal(t, float64(len(big)), entry["body_bytes"])

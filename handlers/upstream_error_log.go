@@ -53,10 +53,13 @@ func filterResponseHeaders(h http.Header) http.Header {
 // the caller gets nil body when reading failed and falls back
 // to the existing "no body" handling in handleUpstreamError.
 //
-// The returned body slice is capped at MAX_UPSTREAM_ERROR_BYTES
-// so the caller cannot exhaust memory by streaming a huge error
-// payload back into DecodeUpstreamError. The log entry, however,
-// records the original body length via body_bytes.
+// The returned body slice is NOT capped — the caller passes it
+// to handleUpstreamError, whose readBounded gate (limit =
+// MAX_UPSTREAM_ERROR_BYTES) refuses to parse any body whose
+// length exceeds MAX_UPSTREAM_ERROR_BYTES. That keeps the
+// "no partial-JSON parsing" safety property intact while still
+// letting the log entry record the original body length via
+// body_bytes for observability.
 func (h *Handler) logUpstreamError(
 	ctx context.Context,
 	requestIDValue, routedModel, providerID string,
@@ -103,9 +106,11 @@ func (h *Handler) logUpstreamError(
 	if err != nil {
 		return nil
 	}
-	if int64(len(body)) > MAX_UPSTREAM_ERROR_BYTES {
-		body = body[:MAX_UPSTREAM_ERROR_BYTES]
-	}
+	// Return the body uncapped so the caller's readBounded gate
+	// (handleUpstreamError → readBounded) can detect oversized
+	// payloads via len > MAX_UPSTREAM_ERROR_BYTES and refuse to
+	// parse partial JSON. The log entry above already records
+	// body_truncated + body_bytes for observability.
 	return body
 }
 

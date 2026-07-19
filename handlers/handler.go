@@ -179,10 +179,8 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 		}
 		defer response.Body.Close()
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-			if peek, peekErr := io.ReadAll(io.LimitReader(response.Body, MAX_UPSTREAM_ERROR_BYTES+1)); peekErr == nil {
-				slog.Error("upstream 4xx/5xx body", "status", response.StatusCode, "model", routed.Model, "provider", profile.ID, "body", string(peek))
-				response.Body = io.NopCloser(bytes.NewReader(peek))
-			}
+			body := h.logUpstreamError(c.Request.Context(), requestID, routed.Model, profile.ID, response)
+			response.Body = io.NopCloser(bytes.NewReader(body))
 			h.handleUpstreamError(c, format, response)
 			return
 		}
@@ -292,6 +290,8 @@ func (h *Handler) HandleCountTokens() gin.HandlerFunc {
 		}
 		defer response.Body.Close()
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			body := h.logUpstreamError(c.Request.Context(), headers.Get("x-request-id"), routed.Model, profile.ID, response)
+			response.Body = io.NopCloser(bytes.NewReader(body))
 			h.handleUpstreamError(c, model.FORMAT_ANTHROPIC_MESSAGES, response)
 			return
 		}
