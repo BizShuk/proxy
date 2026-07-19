@@ -21,8 +21,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const MAX_UPSTREAM_ERROR_BYTES int64 = 64 << 10
-
 var errUpstreamResponseTooLarge = errors.New("upstream response exceeds limit")
 
 // Handler coordinates routing, protocol transforms, credentials, and upstream I/O.

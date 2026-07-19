@@ -1,10 +1,17 @@
 package handlers
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilterResponseHeaders_RemovesSensitiveKeys(t *testing.T) {
@@ -31,4 +38,130 @@ func TestFilterResponseHeaders_NilInputReturnsEmpty(t *testing.T) {
 	out := filterResponseHeaders(nil)
 	assert.NotNil(t, out)
 	assert.Empty(t, out)
+}
+
+// captureLogs swaps slog.Default() to a JSON-handler-backed
+// buffer for the duration of the test, restoring the prior
+// default on cleanup. Pattern mirrors codex_log_test.go.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+// decodeLastLog decodes the most recent JSON log line.
+func decodeLastLog(t *testing.T, buf *bytes.Buffer) map[string]any {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	require.NotEmpty(t, lines, "no log lines captured")
+	last := lines[len(lines)-1]
+	var out map[string]any
+	require.NoError(t, json.Unmarshal([]byte(last), &out))
+	return out
+}
+
+func newResponse(status int, header http.Header, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     header,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func TestLogUpstreamError_IncludesAllFields(t *testing.T) {
+	buf := captureLogs(t)
+	h := &Handler{}
+	resp := newResponse(500, http.Header{
+		"Retry-After":  []string{"30"},
+		"X-Request-Id": []string{"upstream-req-42"},
+	}, `{"err":"boom"}`)
+
+	body := h.logUpstreamError(context.Background(), "req-1", "gpt-5", "openai", resp)
+
+	require.NotNil(t, body)
+	assert.Equal(t, `{"err":"boom"}`, string(body))
+	entry := decodeLastLog(t, buf)
+	assert.Equal(t, "proxy upstream error response", entry["msg"])
+	assert.Equal(t, "ERROR", entry["level"])
+	assert.Equal(t, "req-1", entry["request_id"])
+	assert.Equal(t, "openai", entry["provider"])
+	assert.Equal(t, "gpt-5", entry["model"])
+	assert.Equal(t, float64(500), entry["status_code"])
+	assert.Equal(t, "30", entry["header.retry-after"])
+	assert.Equal(t, "upstream-req-42", entry["header.x-request-id"])
+	assert.Equal(t, `{"err":"boom"}`, entry["body"])
+	assert.Equal(t, false, entry["body_truncated"])
+}
+
+func TestLogUpstreamError_FiltersSensitiveHeaders(t *testing.T) {
+	buf := captureLogs(t)
+	h := &Handler{}
+	resp := newResponse(401, http.Header{
+		"Authorization": []string{"Bearer leak"},
+		"Set-Cookie":    []string{"sid=abc"},
+		"X-API-Key":     []string{"sk-123"},
+		"Content-Type":  []string{"application/json"},
+	}, `{"err":"unauthorized"}`)
+
+	_ = h.logUpstreamError(context.Background(), "req-2", "claude-3", "anthropic", resp)
+
+	entry := decodeLastLog(t, buf)
+	for _, forbidden := range []string{"header.authorization", "header.set-cookie", "header.x-api-key"} {
+		_, present := entry[forbidden]
+		assert.False(t, present, "sensitive header %q must not appear in log", forbidden)
+	}
+	assert.Equal(t, "application/json", entry["header.content-type"])
+}
+
+func TestLogUpstreamError_TruncatesBody(t *testing.T) {
+	buf := captureLogs(t)
+	h := &Handler{}
+	big := strings.Repeat("a", int(MAX_UPSTREAM_ERROR_BYTES)+1024)
+	resp := newResponse(502, http.Header{}, big)
+
+	body := h.logUpstreamError(context.Background(), "req-3", "gpt-5", "openai", resp)
+
+	require.NotNil(t, body)
+	assert.Equal(t, int(MAX_UPSTREAM_ERROR_BYTES), len(body))
+	entry := decodeLastLog(t, buf)
+	assert.Equal(t, true, entry["body_truncated"])
+	assert.Equal(t, float64(len(big)), entry["body_bytes"])
+}
+
+func TestLogUpstreamError_NilBodyNoCrash(t *testing.T) {
+	buf := captureLogs(t)
+	h := &Handler{}
+	resp := &http.Response{StatusCode: 503, Header: http.Header{}, Body: nil}
+
+	body := h.logUpstreamError(context.Background(), "req-4", "gpt-5", "openai", resp)
+
+	assert.Nil(t, body)
+	entry := decodeLastLog(t, buf)
+	assert.Equal(t, float64(503), entry["status_code"])
+	assert.Equal(t, "response body nil", entry["body_read_error"])
+	assert.Equal(t, float64(0), entry["body_bytes"])
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func TestLogUpstreamError_BodyReadError(t *testing.T) {
+	buf := captureLogs(t)
+	h := &Handler{}
+	resp := &http.Response{
+		StatusCode: 502,
+		Header:     http.Header{},
+		Body:       io.NopCloser(failingReader{}),
+	}
+
+	body := h.logUpstreamError(context.Background(), "req-5", "gpt-5", "openai", resp)
+
+	assert.Nil(t, body)
+	entry := decodeLastLog(t, buf)
+	assert.Equal(t, "proxy upstream error response", entry["msg"])
+	assert.NotEmpty(t, entry["body_read_error"])
 }
