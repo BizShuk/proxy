@@ -78,8 +78,20 @@ func New(cfg *pxconfig.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server observer: %w", err)
 	}
+	// Phase C: wire the agentsdk provider dispatcher alongside the
+	// legacy Profile/Catalog. The dispatcher carries the live
+	// core.Provider instances (anthropic / ollama / grok / antigravity /
+	// codex / minimax) so /v1/models can serve their static catalogs.
+	//
+	// Prefer auth-store credentials (OAuth login + API keys), falling
+	// back to env vars for any family without a stored credential.
+	dispatcher, err := upstream.NewDispatcherWithAuthAndEnv(credentials.AsInner())
+	if err != nil {
+		return nil, fmt.Errorf("new proxy server dispatcher: %w", err)
+	}
 	handler, err := NewHandler(HandlerDeps{
 		Router: modelRouter, Registry: registry, Catalog: catalog,
+		Dispatcher: dispatcher,
 		Credentials: credentials, Client: client, Observer: observer,
 		MaxBodyBytes: int64(cfg.BodyLimit) * BYTES_PER_MEBIBYTE,
 	})

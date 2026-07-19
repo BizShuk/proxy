@@ -29,6 +29,7 @@ type Handler struct {
 	router       *route.Router
 	registry     *transform.Registry
 	catalog      *upstream.Catalog
+	dispatcher   *upstream.Dispatcher // optional supplement; lets /v1/models serve provider catalogs directly
 	credentials  *upstream.CredentialResolver
 	client       *upstream.Client
 	observer     TransformObserver
@@ -40,6 +41,7 @@ type HandlerDeps struct {
 	Router       *route.Router
 	Registry     *transform.Registry
 	Catalog      *upstream.Catalog
+	Dispatcher   *upstream.Dispatcher // optional — when set, /v1/models reads from provider catalogs
 	Credentials  *upstream.CredentialResolver
 	Client       *upstream.Client
 	Observer     TransformObserver
@@ -66,6 +68,7 @@ func NewHandler(deps HandlerDeps) (*Handler, error) {
 	}
 	return &Handler{
 		router: deps.Router, registry: deps.Registry, catalog: deps.Catalog,
+		dispatcher: deps.Dispatcher,
 		credentials: deps.Credentials, client: deps.Client, observer: deps.Observer,
 		maxBodyBytes: deps.MaxBodyBytes,
 	}, nil
@@ -180,13 +183,23 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 }
 
 // HandleModels returns the deterministic model catalog exposed by provider profiles.
+//
+// When a Dispatcher is wired in (Phase C), the catalog is the union of
+// every provider's static Models() — falling back to the legacy
+// Catalog.AdvertisedModels() when no Dispatcher is present.
 func (h *Handler) HandleModels() gin.HandlerFunc {
 	type model struct {
 		ID     string `json:"id"`
 		Object string `json:"object"`
 	}
 	return func(c *gin.Context) {
-		models := h.catalog.AdvertisedModels()
+		var models []string
+		switch {
+		case h.dispatcher != nil:
+			models = h.dispatcher.AdvertisedModels()
+		default:
+			models = h.catalog.AdvertisedModels()
+		}
 		data := make([]model, 0, len(models))
 		for _, id := range models {
 			data = append(data, model{ID: id, Object: "model"})

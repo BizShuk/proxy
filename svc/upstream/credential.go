@@ -49,6 +49,21 @@ func (r *CredentialResolver) Resolve(ctx context.Context, providerFamily string)
 	return cred, nil
 }
 
+// AsInner returns the wrapped svc.Resolver so the dispatcher (and other
+// auth-aware callers) can resolve credentials directly without going
+// through the proxy's credential_unavailable error mapping.
+//
+// Use Resolve() when you want a credential mapped to the proxy error
+// surface; use AsInner().Resolve(ctx, family) when you need the raw
+// credential (api_key / oauth fields) for wiring into a Provider
+// constructor.
+func (r *CredentialResolver) AsInner() *svc.Resolver {
+	if r == nil {
+		return nil
+	}
+	return r.inner
+}
+
 func asCredentialUnavailable(err error) error {
 	proxyErr := &model.ProxyError{
 		Kind:    model.ERROR_UNAVAILABLE,
