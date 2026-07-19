@@ -165,3 +165,35 @@ func TestLogUpstreamError_BodyReadError(t *testing.T) {
 	assert.Equal(t, "proxy upstream error response", entry["msg"])
 	assert.NotEmpty(t, entry["body_read_error"])
 }
+
+func TestLogStreamError_MissingResponse(t *testing.T) {
+	buf := captureLogs(t)
+	h := &Handler{}
+
+	h.logStreamError(context.Background(), "req-6", "gpt-5", "openai", nil, "sse_decode_error")
+
+	entry := decodeLastLog(t, buf)
+	assert.Equal(t, "proxy upstream stream error", entry["msg"])
+	assert.Equal(t, "ERROR", entry["level"])
+	assert.Equal(t, "req-6", entry["request_id"])
+	assert.Equal(t, "openai", entry["provider"])
+	assert.Equal(t, "gpt-5", entry["model"])
+	assert.Equal(t, "sse_decode_error", entry["cause"])
+	for k := range entry {
+		assert.False(t, strings.HasPrefix(k, "header."), "no header.* attrs when response is nil; got key %q", k)
+	}
+}
+
+func TestLogStreamError_IncludesFrameData(t *testing.T) {
+	buf := captureLogs(t)
+	h := &Handler{}
+	resp := newResponse(502, http.Header{
+		"X-Request-Id": []string{"upstream-req-99"},
+	}, "")
+
+	h.logStreamError(context.Background(), "req-7", "gpt-5", "openai", resp, "stream_push_error")
+
+	entry := decodeLastLog(t, buf)
+	assert.Equal(t, "stream_push_error", entry["cause"])
+	assert.Equal(t, "upstream-req-99", entry["header.x-request-id"])
+}

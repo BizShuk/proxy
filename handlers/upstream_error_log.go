@@ -109,6 +109,38 @@ func (h *Handler) logUpstreamError(
 	return body
 }
 
+// logStreamError records an upstream stream termination event.
+// response may be nil (e.g. SSE decoder dropped the connection
+// mid-loop). cause must be a short stable token: e.g.
+// "sse_decode_error", "stream_push_error", "context_canceled".
+func (h *Handler) logStreamError(
+	ctx context.Context,
+	requestIDValue, routedModel, providerID string,
+	response *http.Response,
+	cause string,
+) {
+	if h == nil {
+		return
+	}
+	attrs := []slog.Attr{
+		slog.String("request_id", requestIDValue),
+		slog.String("provider", providerID),
+		slog.String("model", routedModel),
+		slog.String("cause", cause),
+	}
+	if response != nil {
+		attrs = append(attrs, slog.Int("status_code", response.StatusCode))
+		for name, values := range filterResponseHeaders(response.Header) {
+			if len(values) == 1 {
+				attrs = append(attrs, slog.String("header."+strings.ToLower(name), values[0]))
+				continue
+			}
+			attrs = append(attrs, slog.Any("header."+strings.ToLower(name), values))
+		}
+	}
+	slog.LogAttrs(ctx, slog.LevelError, "proxy upstream stream error", attrs...)
+}
+
 // readUpstreamErrorBody drains the response body so callers can
 // record the original length via body_bytes. Upstream error
 // bodies are small in practice (they're HTTP error payloads,
