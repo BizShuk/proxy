@@ -13,14 +13,26 @@ import "github.com/bizshuk/agentsdk/core"
 // Add new models in a follow-up after they ship a stable API.
 func DefaultCatalog() []core.ModelSpec {
 	return []core.ModelSpec{
-		{ID: "gpt-5", Family: "gpt-5", Reasoning: true,
-			Input: []core.Modality{core.MODALITY_TEXT}, ContextWindow: 200000, MaxTokens: 16384},
-		{ID: "gpt-5-mini", Family: "gpt-5", Reasoning: false,
-			Input: []core.Modality{core.MODALITY_TEXT}, ContextWindow: 200000, MaxTokens: 16384},
-		{ID: "gpt-5.6", Family: "gpt-5", Reasoning: true,
-			Input: []core.Modality{core.MODALITY_TEXT}, ContextWindow: 200000, MaxTokens: 16384},
-		{ID: "gpt-5.6-sol", Family: "gpt-5", Reasoning: true,
-			Input: []core.Modality{core.MODALITY_TEXT}, ContextWindow: 200000, MaxTokens: 16384},
+		{
+			ID: "gpt-5", Family: "gpt-5", Reasoning: true,
+			Input: []core.Modality{core.MODALITY_TEXT}, ContextWindow: 200000, MaxTokens: 16384,
+		},
+		{
+			ID: "gpt-5-mini", Family: "gpt-5", Reasoning: false,
+			Input: []core.Modality{core.MODALITY_TEXT}, ContextWindow: 200000, MaxTokens: 16384,
+		},
+		{
+			ID: "gpt-5.6-sol", Family: "gpt-5.6", Reasoning: true,
+			Input: []core.Modality{core.MODALITY_TEXT}, ContextWindow: 200000, MaxTokens: 16384,
+		},
+		{
+			ID: "gpt-5.6-terra", Family: "gpt-5.5", Reasoning: true,
+			Input: []core.Modality{core.MODALITY_TEXT}, ContextWindow: 200000, MaxTokens: 16384,
+		},
+		{
+			ID: "gpt-5.6-luna", Family: "gpt-5.5", Reasoning: true,
+			Input: []core.Modality{core.MODALITY_TEXT}, ContextWindow: 200000, MaxTokens: 16384,
+		},
 	}
 }
 

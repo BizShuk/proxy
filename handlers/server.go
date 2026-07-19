@@ -17,12 +17,12 @@ import (
 	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/auth/provider"
 	utils "github.com/bizshuk/auth/utils"
+	"github.com/bizshuk/gosdk/mw"
+	"github.com/bizshuk/gosdk/router"
 	pxconfig "github.com/bizshuk/proxy/config"
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/svc/transform"
 	"github.com/bizshuk/proxy/svc/upstream"
-	"github.com/bizshuk/gosdk/mw"
-	"github.com/bizshuk/gosdk/router"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 )
@@ -91,7 +91,7 @@ func New(cfg *pxconfig.Config) (*Server, error) {
 	}
 	handler, err := NewHandler(HandlerDeps{
 		Router: modelRouter, Registry: registry, Catalog: catalog,
-		Dispatcher: dispatcher,
+		Dispatcher:  dispatcher,
 		Credentials: credentials, Client: client, Observer: observer,
 		MaxBodyBytes: int64(cfg.BodyLimit) * BYTES_PER_MEBIBYTE,
 	})

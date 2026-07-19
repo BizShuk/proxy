@@ -1,0 +1,20 @@
+@baseUrl = http://127.0.0.1:8317
+@token = {{$dotenv AGENTSDK_PROXY_API_KEY}}
+@token = {{$processEnv AGENTSDK_PROXY_API_KEY}}
+
+### Anthropic Messages API (Anthropic Protocol)
+POST {{baseUrl}}/v1/messages
+x-api-key: {{token}}
+anthropic-version: 2023-06-01
+Content-Type: application/json
+
+{
+  "model": "gpt-5.6-sol",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello! How are you?"
+    }
+  ]
+}

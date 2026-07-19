@@ -1,0 +1,24 @@
+@baseUrl = http://127.0.0.1:8317
+@token = {{$dotenv AGENTSDK_PROXY_API_KEY}}
+@token = {{$processEnv AGENTSDK_PROXY_API_KEY}}
+
+### OpenAI Chat Completions API (OpenAI Protocol)
+POST {{baseUrl}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "gpt-5.5",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello! How are you?"
+    }
+  ]
+}
+
+### OpenAI List Models
+GET {{baseUrl}}/v1/models
+Authorization: Bearer {{token}}
+Content-Type: application/json

@@ -12,8 +12,8 @@ import (
 
 // TransformObserver records conversion diagnostics without logging request data.
 type TransformObserver interface {
-	RecordWarning(context.Context, string, model.Format, model.Format, model.Warning)
-	RecordLoss(context.Context, string, model.Format, model.Format, model.SemanticLoss)
+	RecordWarning(context.Context, string, string, model.Format, model.Format, model.Warning)
+	RecordLoss(context.Context, string, string, model.Format, model.Format, model.SemanticLoss)
 }
 
 type transformObserver struct {
@@ -43,9 +43,10 @@ func NewTransformObserver(logger *slog.Logger, meter metric.Meter) (TransformObs
 	return &transformObserver{logger: logger, warnings: warnings, losses: losses}, nil
 }
 
-func (o *transformObserver) RecordWarning(ctx context.Context, provider string, source, target model.Format, warning model.Warning) {
+func (o *transformObserver) RecordWarning(ctx context.Context, provider, requestIDValue string, source, target model.Format, warning model.Warning) {
 	attributes := transformAttributes(provider, source, target)
 	o.logger.WarnContext(ctx, "proxy transform warning",
+		"request_id", requestIDValue,
 		"provider", provider,
 		"source_format", source,
 		"target_format", target,
@@ -54,9 +55,10 @@ func (o *transformObserver) RecordWarning(ctx context.Context, provider string, 
 	o.warnings.Add(ctx, 1, metric.WithAttributes(attributes...))
 }
 
-func (o *transformObserver) RecordLoss(ctx context.Context, provider string, source, target model.Format, loss model.SemanticLoss) {
+func (o *transformObserver) RecordLoss(ctx context.Context, provider, requestIDValue string, source, target model.Format, loss model.SemanticLoss) {
 	attributes := transformAttributes(provider, source, target)
 	o.logger.WarnContext(ctx, "proxy transform semantic loss",
+		"request_id", requestIDValue,
 		"provider", provider,
 		"source_format", source,
 		"target_format", target,

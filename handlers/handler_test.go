@@ -308,11 +308,11 @@ func newHandlerForCredentialWithLimit(t *testing.T, credential *authmodel.Creden
 	return handler
 }
 
-func (o *recordingObserver) RecordWarning(_ context.Context, _ string, _, _ model.Format, warning model.Warning) {
+func (o *recordingObserver) RecordWarning(_ context.Context, _, _ string, _, _ model.Format, warning model.Warning) {
 	o.warnings = append(o.warnings, warning)
 }
 
-func (o *recordingObserver) RecordLoss(_ context.Context, _ string, _, _ model.Format, loss model.SemanticLoss) {
+func (o *recordingObserver) RecordLoss(_ context.Context, _, _ string, _, _ model.Format, loss model.SemanticLoss) {
 	o.losses = append(o.losses, loss)
 }
 
@@ -715,7 +715,7 @@ func TestHandlerRecordsEachTransformDiagnosticOnce(t *testing.T) {
 	deps.Observer = observer
 	handler, err := NewHandler(deps)
 	require.NoError(t, err)
-	handler.recordDiagnostics(context.Background(), "xai", model.FORMAT_OPENAI_CHAT, model.FORMAT_OPENAI_RESPONSES, model.TransformResult{
+	handler.recordDiagnostics(context.Background(), "xai", "req-test-3", model.FORMAT_OPENAI_CHAT, model.FORMAT_OPENAI_RESPONSES, model.TransformResult{
 		Warnings: []model.Warning{{Code: "warning"}},
 		Losses:   []model.SemanticLoss{{Field: "messages.name"}},
 	})

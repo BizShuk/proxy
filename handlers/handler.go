@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"bytes"
 	"io"
 	"log/slog"
 	"mime"
@@ -68,7 +69,7 @@ func NewHandler(deps HandlerDeps) (*Handler, error) {
 	}
 	return &Handler{
 		router: deps.Router, registry: deps.Registry, catalog: deps.Catalog,
-		dispatcher: deps.Dispatcher,
+		dispatcher:  deps.Dispatcher,
 		credentials: deps.Credentials, client: deps.Client, observer: deps.Observer,
 		maxBodyBytes: deps.MaxBodyBytes,
 	}, nil
@@ -108,6 +109,17 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 			h.writeError(c, format, err)
 			return
 		}
+		requestID := requestID(c.GetHeader("x-request-id"))
+		slog.LogAttrs(c.Request.Context(), slog.LevelInfo, "proxy request routed",
+			slog.String("request_id", requestID),
+			slog.String("model", routed.Model),
+			slog.String("routed_family", routed.ProviderID),
+			slog.String("provider", profile.ID),
+			slog.String("credential_kind", string(credential.Kind)),
+			slog.String("source_format", string(format)),
+			slog.String("target_format", string(targetFormat)),
+			slog.Bool("stream", metadata.Stream),
+		)
 		pair, ok := h.registry.Lookup(format, targetFormat)
 		if !ok {
 			h.writeError(c, format, &model.ProxyError{
@@ -117,7 +129,6 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 			return
 		}
 
-		requestID := requestID(c.GetHeader("x-request-id"))
 		startedAt := time.Now()
 		defer func() {
 			slog.LogAttrs(c.Request.Context(), slog.LevelInfo, "proxy request completed",
@@ -144,7 +155,7 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 			h.writeError(c, format, err)
 			return
 		}
-		h.recordDiagnostics(c.Request.Context(), profile.ID, format, targetFormat, transformed)
+		h.recordDiagnostics(c.Request.Context(), profile.ID, requestID, format, targetFormat, transformed)
 		translated := model.RequestEnvelope{
 			SourceFormat: format, TargetFormat: targetFormat, Model: routed.Model,
 			Stream: metadata.Stream, Headers: headers, Body: transformed.Body,
@@ -156,6 +167,9 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 		}
 		translated.Body = normalized.Body
 		translated.Stream = normalized.UpstreamStream
+		if profile.ID == OPENAI_CODEX_OAUTH_PROFILE_ID {
+			h.logCodexRequestPayload(c.Request.Context(), requestID, routed.Model, translated.Body, metadata.Stream)
+		}
 		exchange := model.Exchange{
 			OriginalRequest: original, TranslatedRequest: translated,
 			ProviderID: profile.ID, NewID: uuid.NewString,
@@ -167,6 +181,10 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 		}
 		defer response.Body.Close()
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			if peek, peekErr := io.ReadAll(io.LimitReader(response.Body, MAX_UPSTREAM_ERROR_BYTES+1)); peekErr == nil {
+				slog.Error("upstream 4xx/5xx body", "status", response.StatusCode, "model", routed.Model, "provider", profile.ID, "body", string(peek))
+				response.Body = io.NopCloser(bytes.NewReader(peek))
+			}
 			h.handleUpstreamError(c, format, response)
 			return
 		}
@@ -239,6 +257,13 @@ func (h *Handler) HandleCountTokens() gin.HandlerFunc {
 			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, err)
 			return
 		}
+		slog.LogAttrs(c.Request.Context(), slog.LevelInfo, "proxy count_tokens routed",
+			slog.String("request_id", requestID(c.GetHeader("x-request-id"))),
+			slog.String("model", routed.Model),
+			slog.String("routed_family", routed.ProviderID),
+			slog.String("provider", profile.ID),
+			slog.String("credential_kind", string(credential.Kind)),
+		)
 		if strings.TrimSpace(profile.CountTokensEndpoint) == "" {
 			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, &model.ProxyError{
 				Kind: model.ERROR_UNSUPPORTED_FEATURE, Status: http.StatusNotImplemented,
@@ -429,7 +454,7 @@ func (h *Handler) handleNonStream(
 		h.writeError(c, source, err)
 		return
 	}
-	h.recordDiagnostics(c.Request.Context(), profile.ID, source, target, result)
+	h.recordDiagnostics(c.Request.Context(), profile.ID, exchange.TranslatedRequest.Headers.Get("x-request-id"), source, target, result)
 	copySafeResponseHeaders(c.Writer.Header(), response.Header, profile)
 	c.Header("Content-Type", "application/json")
 	c.Header("x-request-id", exchange.TranslatedRequest.Headers.Get("x-request-id"))
@@ -502,7 +527,7 @@ func (h *Handler) handleBridge(
 		h.writeError(c, source, err)
 		return
 	}
-	h.recordDiagnostics(c.Request.Context(), profile.ID, source, target, result)
+	h.recordDiagnostics(c.Request.Context(), profile.ID, exchange.TranslatedRequest.Headers.Get("x-request-id"), source, target, result)
 	copySafeResponseHeaders(c.Writer.Header(), response.Header, profile)
 	c.Header("Content-Type", "application/json")
 	c.Header("x-request-id", exchange.TranslatedRequest.Headers.Get("x-request-id"))
@@ -555,12 +580,12 @@ func (h *Handler) handleUpstreamError(c *gin.Context, source model.Format, respo
 	h.writeError(c, source, transform.DecodeUpstreamError(response.StatusCode, response.Header, body))
 }
 
-func (h *Handler) recordDiagnostics(ctx context.Context, provider string, source, target model.Format, result model.TransformResult) {
+func (h *Handler) recordDiagnostics(ctx context.Context, provider, requestIDValue string, source, target model.Format, result model.TransformResult) {
 	for _, warning := range result.Warnings {
-		h.observer.RecordWarning(ctx, provider, source, target, warning)
+		h.observer.RecordWarning(ctx, provider, requestIDValue, source, target, warning)
 	}
 	for _, loss := range result.Losses {
-		h.observer.RecordLoss(ctx, provider, source, target, loss)
+		h.observer.RecordLoss(ctx, provider, requestIDValue, source, target, loss)
 	}
 }
 

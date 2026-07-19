@@ -1,0 +1,125 @@
+@baseUrl = https://api.minimax.io
+@token = {{$processEnv MINIMAX_API_KEY}}
+
+### Minimax - OpenAI List Models
+# https://platform.minimax.io/docs/api-reference/models/openai/list-models
+GET {{baseUrl}}/v1/models
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+### Minimax - Anthropic List Models
+# https://platform.minimax.io/docs/api-reference/models/anthropic/list-models
+GET {{baseUrl}}/anthropic/v1/models
+x-api-key: {{token}}
+anthropic-version: 2023-06-01
+Content-Type: application/json
+
+### Minimax - Anthropic Messages API
+# https://platform.minimax.io/docs/api-reference/text-chat-anthropic
+POST {{baseUrl}}/anthropic/v1/messages
+x-api-key: {{token}}
+anthropic-version: 2023-06-01
+Content-Type: application/json
+
+{
+  "model": "MiniMax-Text-01",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello! How are you?"
+    }
+  ]
+}
+
+### Minimax - OpenAI Chat Completions API
+# https://platform.minimax.io/docs/api-reference/text-chat-openai
+POST {{baseUrl}}/v1/chat/completions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "MiniMax-Text-01",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello! How are you?"
+    }
+  ],
+  "max_tokens": 1024
+}
+
+### Minimax - Responses Create
+# https://platform.minimax.io/docs/api-reference/responses-create
+POST {{baseUrl}}/v1/responses
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "MiniMax-M3",
+  "input": "Hello!"
+}
+
+### Minimax - Responses Input Tokens
+# https://platform.minimax.io/docs/api-reference/responses-input-tokens
+POST {{baseUrl}}/v1/responses/input_tokens
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "model": "MiniMax-M3",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": "Please implement a generic quicksort algorithm in Python with these requirements: 1) in-place sorting to save memory; 2) three-way partitioning to handle duplicate elements; 3) switch to insertion sort for small subarrays; 4) include complete unit tests. Finally, explain the advantage of three-way partitioning over the classic Lomuto scheme when keys repeat."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "search_docs",
+      "description": "Search the official documentation of the Python standard library or a third-party package",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "library": {
+            "type": "string",
+            "description": "Library name, e.g. `typing`, `itertools`"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search keywords"
+          }
+        },
+        "required": [
+          "library",
+          "query"
+        ]
+      }
+    },
+    {
+      "type": "function",
+      "name": "run_python",
+      "description": "Execute Python code in a sandbox and return stdout / error",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Python code to execute"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "description": "Execution timeout in seconds",
+            "default": 10
+          }
+        },
+        "required": [
+          "code"
+        ]
+      }
+    }
+  ]
+}
+

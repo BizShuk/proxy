@@ -23,7 +23,7 @@ type fakeProvider struct {
 
 func (f *fakeProvider) ID() string               { return f.idVal }
 func (f *fakeProvider) Models() []core.ModelSpec { return f.models }
-func (f *fakeProvider) AuthSchemes() []string   { return []string{"api_key"} }
+func (f *fakeProvider) AuthSchemes() []string    { return []string{"api_key"} }
 func (f *fakeProvider) Generate(ctx context.Context, req core.ModelRequest) (core.ModelResult, error) {
 	return core.ModelResult{}, nil
 }

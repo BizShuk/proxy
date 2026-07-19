@@ -21,7 +21,9 @@ const (
 	// DEFAULT_CODEX_ORIGINATOR identifies requests made through the Codex profile.
 	DEFAULT_CODEX_ORIGINATOR = "codex_cli_rs"
 	// DEFAULT_CODEX_VERSION is the Codex compatibility version sent upstream.
-	DEFAULT_CODEX_VERSION = "0.125.0"
+	// Must be >= the version Codex upstream enforces for newer models
+	// (e.g., gpt-5.6-sol returns 400 if version is too old).
+	DEFAULT_CODEX_VERSION = "0.144.1"
 
 	ANTHROPIC_VERSION = "2023-06-01"
 )
