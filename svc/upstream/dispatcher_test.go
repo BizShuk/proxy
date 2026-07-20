@@ -22,7 +22,7 @@ type testProvider struct {
 
 func (p *testProvider) ID() string               { return p.id }
 func (p *testProvider) Models() []core.ModelSpec { return p.models }
-func (p *testProvider) AuthSchemes() []string   { return []string{"api_key"} }
+func (p *testProvider) AuthSchemes() []string    { return []string{"api_key"} }
 
 func (p *testProvider) Generate(ctx context.Context, req core.ModelRequest) (core.ModelResult, error) {
 	return core.ModelResult{}, nil

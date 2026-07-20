@@ -14,13 +14,13 @@ package upstream
 
 import (
 	"github.com/bizshuk/agentsdk/core"
-	"github.com/bizshuk/proxy/providers/antigravity"
-	"github.com/bizshuk/proxy/providers/anthropic"
-	"github.com/bizshuk/proxy/providers/codex"
-	"github.com/bizshuk/proxy/providers/google"
-	"github.com/bizshuk/proxy/providers/grok"
-	"github.com/bizshuk/proxy/providers/minimax"
-	"github.com/bizshuk/proxy/providers/ollama"
+	"github.com/bizshuk/agentsdk/provider/anthropic"
+	"github.com/bizshuk/agentsdk/provider/antigravity"
+	"github.com/bizshuk/agentsdk/provider/codex"
+	"github.com/bizshuk/agentsdk/provider/google"
+	"github.com/bizshuk/agentsdk/provider/grok"
+	"github.com/bizshuk/agentsdk/provider/minimax"
+	"github.com/bizshuk/agentsdk/provider/ollama"
 )
 
 // NewDefaultDispatcher returns a Dispatcher with the canonical seven
@@ -37,7 +37,7 @@ import (
 func NewDefaultDispatcher() (*Dispatcher, error) {
 	d := NewDispatcher()
 	candidates := []struct {
-		name string
+		name  string
 		build func() (core.Provider, error)
 	}{
 		{"anthropic", func() (core.Provider, error) {

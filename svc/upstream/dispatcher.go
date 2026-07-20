@@ -3,7 +3,7 @@
 // The Dispatcher is the proxy's bottom-layer entry into the agentsdk
 // provider packages. Each provider family (anthropic, ollama, grok,
 // antigravity, codex, minimax) owns its own DTO / validation / auth /
-// stream parsing under agentsdk/provider/<name>/. The Dispatcher holds
+// stream parsing under llm_provider/<name>/. The Dispatcher holds
 // live provider.Provider instances keyed by family so handler.go can
 // route a request to the right provider and pick up per-provider
 // metadata (model catalog, supported auth schemes) without going
@@ -28,8 +28,8 @@ import (
 // and resolved secret. It is the seam between the proxy's credential
 // resolver and the provider's own auth flow:
 //
-//   api_key  → pass the resolved key to provider.New(WithAPIKey(key))
-//   oauth    → pass OAuthCredentials to provider.NewWithOAuth(creds)
+//	api_key  → pass the resolved key to provider.New(WithAPIKey(key))
+//	oauth    → pass OAuthCredentials to provider.NewWithOAuth(creds)
 //
 // Returning an error here surfaces as a credential_unavailable proxy
 // error at handler.go.

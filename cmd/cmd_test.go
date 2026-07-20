@@ -26,6 +26,6 @@ func TestCommandScopeKeepsPortFlagInline(t *testing.T) {
 
 	assert.NotContains(t, string(source), `Changed("port")`)
 	assert.NotContains(t, string(source), "addCommonFlags")
-	assert.Contains(t, string(source), `PersistentFlags().IntVar(&opts.port, "port", DEFAULT_PORT, "Server port")`)
-	assert.Contains(t, strings.ReplaceAll(string(source), " ", ""), "cfg.Server.Port=opts.port")
+	assert.Contains(t, string(source), `PersistentFlags().IntVar(&port, "port", DEFAULT_PORT, "Server port")`)
+	assert.Contains(t, strings.ReplaceAll(string(source), " ", ""), "cfg.Server.Port=port")
 }

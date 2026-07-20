@@ -8,13 +8,13 @@
 //
 // Per-provider routing table:
 //
-//   family       api_key                       oauth
-//   anthropic    anthropic.New(WithAPIKey)     anthropic.NewWithOAuth
-//   codex        codex.New(WithAPIKey)         codex.NewWithOAuth
-//   antigravity  antigravity.New(WithAPIKey)   antigravity.NewWithOAuth
-//   grok         grok.New(WithAPIKey)          grok.NewWithOAuth
-//   ollama       ollama.New(WithAPIKey)        (keyless only)
-//   minimax      minimax.New(WithAPIKey)       (api key only)
+//	family       api_key                       oauth
+//	anthropic    anthropic.New(WithAPIKey)     anthropic.NewWithOAuth
+//	codex        codex.New(WithAPIKey)         codex.NewWithOAuth
+//	antigravity  antigravity.New(WithAPIKey)   antigravity.NewWithOAuth
+//	grok         grok.New(WithAPIKey)          grok.NewWithOAuth
+//	ollama       ollama.New(WithAPIKey)        (keyless only)
+//	minimax      minimax.New(WithAPIKey)       (api key only)
 //
 // Adding a new provider: add a case in buildAPIKeyProvider / buildOAuthProvider
 // and a row above. The Dispatcher itself is provider-agnostic; this
@@ -30,13 +30,13 @@ import (
 	authmodel "github.com/bizshuk/auth/model"
 	svc "github.com/bizshuk/auth/svc"
 
-	"github.com/bizshuk/proxy/providers/antigravity"
-	"github.com/bizshuk/proxy/providers/anthropic"
-	"github.com/bizshuk/proxy/providers/codex"
-	"github.com/bizshuk/proxy/providers/google"
-	"github.com/bizshuk/proxy/providers/grok"
-	"github.com/bizshuk/proxy/providers/minimax"
-	"github.com/bizshuk/proxy/providers/ollama"
+	"github.com/bizshuk/agentsdk/provider/anthropic"
+	"github.com/bizshuk/agentsdk/provider/antigravity"
+	"github.com/bizshuk/agentsdk/provider/codex"
+	"github.com/bizshuk/agentsdk/provider/google"
+	"github.com/bizshuk/agentsdk/provider/grok"
+	"github.com/bizshuk/agentsdk/provider/minimax"
+	"github.com/bizshuk/agentsdk/provider/ollama"
 )
 
 // BuildProvider resolves a persisted auth credential into a live
