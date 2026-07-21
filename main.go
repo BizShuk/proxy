@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	root := cmd.NewCommand()
+	root := cmd.ProxyCmd
 	// main 負責印錯誤與設定 exit code,cobra 不要再印一次。
 	root.SilenceUsage = true
 	root.SilenceErrors = true

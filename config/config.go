@@ -19,7 +19,10 @@ import (
 const APP_NAME = "agentSDK"
 
 // Config is the fully-resolved runtime configuration, loaded through gosdk's
-// layered viper loader (settings.json + settings.local.json + APP_* env).
+// layered viper loader (settings.json + settings.local.json, plus APP_*
+// env override for keys whose dot→underscore form is a valid env name —
+// i.e. anything without a `-`, such as server.port or debug). Keys with
+// dashes (auth-dir, body-limit-mb, timeouts.*-ms) are file-only.
 // Field keys mirror the settings.json layout via mapstructure tags.
 type Config struct {
 	Server    ServerConfig           `mapstructure:"server"`
@@ -42,8 +45,9 @@ type StatsConfig struct {
 }
 
 // LoadConfig runs gosdk's config.Default (which merges settings.json →
-// settings.local.json → APP_* env into the global viper) and unmarshals the
-// result into a typed Config, applying defaults for any unset field.
+// settings.local.json into the global viper, plus APP_* env override for
+// keys whose flat form is a valid env name) and unmarshals the result
+// into a typed Config, applying defaults for any unset field.
 func LoadConfig() (*Config, error) {
 	setDefaults()
 	gosdkconfig.Default(gosdkconfig.WithAppName(APP_NAME))

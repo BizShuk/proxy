@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	gosdkcmd "github.com/bizshuk/gosdk/cmd"
 	pxconfig "github.com/bizshuk/proxy/config"
 	"github.com/bizshuk/proxy/handlers"
 	"github.com/spf13/cobra"
@@ -16,11 +17,12 @@ import (
 
 const DEFAULT_PORT = 8317
 
-// NewCommand returns the `proxy` command. It is self-contained: settings come
-// from pxconfig.LoadConfig (gosdk layered viper under the agentSDK namespace).
-func NewCommand() *cobra.Command {
-	port := DEFAULT_PORT
-	command := &cobra.Command{
+var (
+	port = DEFAULT_PORT
+
+	// ProxyCmd starts the proxy server. Settings come from pxconfig.LoadConfig
+	// (gosdk layered viper under the agentSDK namespace).
+	ProxyCmd = &cobra.Command{
 		Use:   "proxy",
 		Short: "Start the proxy server",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -40,6 +42,10 @@ func NewCommand() *cobra.Command {
 			return server.Run(ctx)
 		},
 	}
-	command.PersistentFlags().IntVar(&port, "port", DEFAULT_PORT, "Server port")
-	return command
+)
+
+func init() {
+	ProxyCmd.PersistentFlags().IntVar(&port, "port", DEFAULT_PORT, "Server port")
+	// gosdk 提供的現成 config 子命令,顯示/修改分層設定 (settings.local.json)。
+	ProxyCmd.AddCommand(gosdkcmd.ConfigCmd)
 }

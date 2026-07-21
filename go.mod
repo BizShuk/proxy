@@ -3,9 +3,9 @@ module github.com/bizshuk/proxy
 go 1.26.0
 
 require (
-	github.com/bizshuk/agentsdk v0.0.0-20260718201845-f1eecd0f1ed4
+	github.com/bizshuk/agentsdk v0.0.0-20260720171156-c4107072037b
 	github.com/bizshuk/auth v0.0.0-20260718180648-a05ed97812a8
-	github.com/bizshuk/gosdk v1.1.0
+	github.com/bizshuk/gosdk v1.2.5
 	github.com/gin-gonic/gin v1.11.0
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.10.2
@@ -15,12 +15,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk/metric v1.44.0
 )
-
-// Local agentsdk checkout pulls in the in-progress provider packages
-// (anthropic / ollama / grok / antigravity / codex / minimax) and the
-// extended core.Provider interface. Remove this replace directive once
-// the agentsdk module publishes a version that includes those changes.
-replace github.com/bizshuk/agentsdk => ../../agentSDK
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.50.2 // indirect
