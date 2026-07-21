@@ -21,7 +21,7 @@ const APP_NAME = "agentSDK"
 // Config is the fully-resolved runtime configuration, loaded through gosdk's
 // layered viper loader (settings.json + settings.local.json, plus APP_*
 // env override for keys whose dot→underscore form is a valid env name —
-// i.e. anything without a `-`, such as server.port or debug). Keys with
+// i.e. anything without a `-`, such as server.port). Keys with
 // dashes (auth-dir, body-limit-mb, timeouts.*-ms) are file-only.
 // Field keys mirror the settings.json layout via mapstructure tags.
 type Config struct {
@@ -31,7 +31,6 @@ type Config struct {
 	BodyLimit int                    `mapstructure:"body-limit-mb"`
 	Timeouts  upstream.TimeoutConfig `mapstructure:"timeouts"`
 	Stats     StatsConfig            `mapstructure:"stats"`
-	Debug     string                 `mapstructure:"debug"`
 	Cloaking  map[string]any         `mapstructure:"cloaking"`
 }
 
@@ -73,7 +72,6 @@ func setDefaults() {
 	viper.SetDefault("timeouts.stream-messages-ms", 600000)
 	viper.SetDefault("timeouts.count-tokens-ms", 30000)
 	viper.SetDefault("stats.enabled", true)
-	viper.SetDefault("debug", "off")
 }
 
 // ensureAPIKey mirrors the TS behaviour: if no api-keys are configured, mint

@@ -98,7 +98,8 @@ func New(cfg *pxconfig.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server handler: %w", err)
 	}
-	if cfg.Debug == "off" {
+	// Default to release mode; GIN_MODE env var still overrides when set.
+	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	engine := gin.New()

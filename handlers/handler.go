@@ -67,8 +67,8 @@ func NewHandler(deps HandlerDeps) (*Handler, error) {
 	}
 	return &Handler{
 		router: deps.Router, registry: deps.Registry, catalog: deps.Catalog,
-		dispatcher:  deps.Dispatcher,
-		credentials: deps.Credentials, client: deps.Client, observer: deps.Observer,
+		dispatcher:   deps.Dispatcher,
+		credentials:  deps.Credentials, client: deps.Client, observer: deps.Observer,
 		maxBodyBytes: deps.MaxBodyBytes,
 	}, nil
 }
@@ -92,22 +92,41 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 			})
 			return
 		}
+		// Capture the request ID once and reuse across every snapshot.
+		// Calling requestID() twice with a missing x-request-id header
+		// produces two random UUIDs, breaking log correlation between
+		// req.before and the routed/completed records below.
+		requestID := requestID(c.GetHeader("x-request-id"))
+		// req.before: capture the raw client body before any routing/transform.
+		// Routing/credentials/profile haven't resolved yet, so provider and
+		// target_format are intentionally empty; the later req.now snapshot
+		// carries the resolved routing.
+		h.emitDebugPayload(c.Request.Context(), debugStageRequestBefore,
+			requestID, metadata.Model, "", format, "", body)
 		routed, err := h.router.Resolve(format, metadata.Model)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, metadata.Model, "", format, "", code, kind, msg, body)
 			h.writeError(c, format, err)
 			return
 		}
 		credential, err := h.credentials.Resolve(c.Request.Context(), routed.ProviderID)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, "", format, "", code, kind, msg, body)
 			h.writeError(c, format, err)
 			return
 		}
 		profile, targetFormat, err := h.catalog.ResolveProfile(routed.ProviderID, credential.Kind, routed.ForcedTarget)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, "", format, "", code, kind, msg, body)
 			h.writeError(c, format, err)
 			return
 		}
-		requestID := requestID(c.GetHeader("x-request-id"))
+		// requestID was captured at the top of Handle() so every snapshot
+		// (req.before, req.now, resp.before, resp.now, completed) shares the
+		// same correlation id even when x-request-id is missing.
 		slog.LogAttrs(c.Request.Context(), slog.LevelInfo, "proxy request routed",
 			slog.String("request_id", requestID),
 			slog.String("model", routed.Model),
@@ -120,10 +139,12 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 		)
 		pair, ok := h.registry.Lookup(format, targetFormat)
 		if !ok {
-			h.writeError(c, format, &model.ProxyError{
+			pe := &model.ProxyError{
 				Kind: model.ERROR_UNSUPPORTED_FEATURE, Status: http.StatusUnprocessableEntity,
 				Code: "transform_unavailable", Message: "requested protocol transform is unavailable",
-			})
+			}
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, "", format, "", pe.Code, string(pe.Kind), pe.Message, body)
+			h.writeError(c, format, pe)
 			return
 		}
 
@@ -150,6 +171,8 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 		transformInput.Model = routed.Model
 		transformed, err := pair.Request(c.Request.Context(), transformInput)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, "", format, targetFormat, code, kind, msg, body)
 			h.writeError(c, format, err)
 			return
 		}
@@ -160,11 +183,18 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 		}
 		normalized, err := profile.NormalizeRequest(translated)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, profile.ID, format, targetFormat, code, kind, msg, translated.Body)
 			h.writeError(c, format, err)
 			return
 		}
 		translated.Body = normalized.Body
 		translated.Stream = normalized.UpstreamStream
+		// req.now: the wire body that will go out to upstream — includes
+		// request-pair transform AND profile.NormalizeRequest. This is the
+		// most useful snapshot for diagnosing 4xx semantic-loss issues.
+		h.emitDebugPayload(c.Request.Context(), debugStageRequestNow,
+			requestID, routed.Model, profile.ID, format, targetFormat, translated.Body)
 		if profile.ID == OPENAI_CODEX_OAUTH_PROFILE_ID {
 			h.logCodexRequestPayload(c.Request.Context(), requestID, routed.Model, translated.Body, metadata.Stream)
 		}
@@ -174,6 +204,8 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 		}
 		response, err := h.client.Do(c.Request.Context(), profile, credential, translated)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, profile.ID, format, targetFormat, code, kind, msg, translated.Body)
 			h.writeError(c, format, err)
 			return
 		}
@@ -181,7 +213,7 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 			body := h.logUpstreamError(c.Request.Context(), requestID, routed.Model, profile.ID, response)
 			response.Body = io.NopCloser(bytes.NewReader(body))
-			h.handleUpstreamError(c, format, response)
+			h.handleUpstreamError(c, format, targetFormat, requestID, routed.Model, profile.ID, response)
 			return
 		}
 		if normalized.BridgeToNonStream {
@@ -225,78 +257,105 @@ func (h *Handler) HandleModels() gin.HandlerFunc {
 // HandleCountTokens proxies an Anthropic count request to a native provider capability.
 func (h *Handler) HandleCountTokens() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Capture requestID once so every snapshot shares the same id.
+		requestID := requestID(c.GetHeader("x-request-id"))
 		body, err := h.readRequestBody(c)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, "", "", model.FORMAT_ANTHROPIC_MESSAGES, "", code, kind, msg, nil)
 			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, err)
 			return
 		}
 		request, modelName, err := decodeCountTokensRequest(body)
 		if err != nil {
-			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, &model.ProxyError{
+			pe := &model.ProxyError{
 				Kind: model.ERROR_INVALID_REQUEST, Status: http.StatusBadRequest,
 				Code: "invalid_request", Message: "invalid request", Cause: err,
-			})
+			}
+			h.emitDebugFailure(c.Request.Context(), requestID, "", "", model.FORMAT_ANTHROPIC_MESSAGES, "",
+				pe.Code, string(pe.Kind), pe.Message, body)
+			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, pe)
 			return
 		}
 		routed, err := h.router.Resolve(model.FORMAT_ANTHROPIC_MESSAGES, modelName)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, modelName, "", model.FORMAT_ANTHROPIC_MESSAGES, "", code, kind, msg, body)
 			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, err)
 			return
 		}
 		credential, err := h.credentials.Resolve(c.Request.Context(), routed.ProviderID)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, "", model.FORMAT_ANTHROPIC_MESSAGES, "", code, kind, msg, body)
 			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, err)
 			return
 		}
 		profile, _, err := h.catalog.ResolveProfile(routed.ProviderID, credential.Kind, routed.ForcedTarget)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, "", model.FORMAT_ANTHROPIC_MESSAGES, "", code, kind, msg, body)
 			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, err)
 			return
 		}
 		slog.LogAttrs(c.Request.Context(), slog.LevelInfo, "proxy count_tokens routed",
-			slog.String("request_id", requestID(c.GetHeader("x-request-id"))),
+			slog.String("request_id", requestID),
 			slog.String("model", routed.Model),
 			slog.String("routed_family", routed.ProviderID),
 			slog.String("provider", profile.ID),
 			slog.String("credential_kind", string(credential.Kind)),
 		)
 		if strings.TrimSpace(profile.CountTokensEndpoint) == "" {
-			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, &model.ProxyError{
+			pe := &model.ProxyError{
 				Kind: model.ERROR_UNSUPPORTED_FEATURE, Status: http.StatusNotImplemented,
 				Code: "unsupported_feature", Message: "native token counting is not supported",
-			})
+			}
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, profile.ID, model.FORMAT_ANTHROPIC_MESSAGES, "",
+				pe.Code, string(pe.Kind), pe.Message, body)
+			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, pe)
 			return
 		}
 		request["model"], err = json.Marshal(routed.Model)
 		if err != nil {
-			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, protocolStreamError("cannot encode token count modelName", err))
+			pe := protocolStreamError("cannot encode token count modelName", err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, profile.ID, model.FORMAT_ANTHROPIC_MESSAGES, "",
+				pe.Code, string(pe.Kind), pe.Message, body)
+			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, pe)
 			return
 		}
 		translatedBody, err := json.Marshal(request)
 		if err != nil {
-			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, protocolStreamError("cannot encode token count request", err))
+			pe := protocolStreamError("cannot encode token count request", err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, profile.ID, model.FORMAT_ANTHROPIC_MESSAGES, "",
+				pe.Code, string(pe.Kind), pe.Message, body)
+			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, pe)
 			return
 		}
 		headers := c.Request.Header.Clone()
-		headers.Set("x-request-id", requestID(c.GetHeader("x-request-id")))
+		headers.Set("x-request-id", requestID)
 		response, err := h.client.CountTokens(c.Request.Context(), profile, credential, model.RequestEnvelope{
 			SourceFormat: model.FORMAT_ANTHROPIC_MESSAGES,
 			TargetFormat: model.FORMAT_ANTHROPIC_MESSAGES,
 			Model:        routed.Model, Headers: headers, Body: translatedBody,
 		})
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, profile.ID, model.FORMAT_ANTHROPIC_MESSAGES, "", code, kind, msg, translatedBody)
 			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, err)
 			return
 		}
 		defer response.Body.Close()
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-			body := h.logUpstreamError(c.Request.Context(), headers.Get("x-request-id"), routed.Model, profile.ID, response)
+			body := h.logUpstreamError(c.Request.Context(), requestID, routed.Model, profile.ID, response)
 			response.Body = io.NopCloser(bytes.NewReader(body))
-			h.handleUpstreamError(c, model.FORMAT_ANTHROPIC_MESSAGES, response)
+			h.handleUpstreamError(c, model.FORMAT_ANTHROPIC_MESSAGES, model.FORMAT_ANTHROPIC_MESSAGES,
+				requestID, routed.Model, profile.ID, response)
 			return
 		}
 		responseBody, err := readBounded(response.Body, h.maxBodyBytes)
 		if err != nil {
+			code, kind, msg := debugErrorInfo(err)
+			h.emitDebugFailure(c.Request.Context(), requestID, routed.Model, profile.ID, model.FORMAT_ANTHROPIC_MESSAGES, "", code, kind, msg, responseBody)
 			h.writeError(c, model.FORMAT_ANTHROPIC_MESSAGES, err)
 			return
 		}
@@ -462,6 +521,10 @@ func (h *Handler) handleNonStream(
 		h.writeError(c, source, err)
 		return
 	}
+	// resp.before: raw upstream body, before the response transform.
+	h.emitDebugPayload(c.Request.Context(), debugStageResponseBefore,
+		exchange.TranslatedRequest.Headers.Get("x-request-id"),
+		exchange.TranslatedRequest.Model, profile.ID, source, target, body)
 	result, err := pair.Response(c.Request.Context(), model.ResponseEnvelope{
 		Status: response.StatusCode, Headers: response.Header.Clone(), Body: body, Exchange: exchange,
 	})
@@ -469,6 +532,10 @@ func (h *Handler) handleNonStream(
 		h.writeError(c, source, err)
 		return
 	}
+	// resp.now: the wire body going back to the client after response transform.
+	h.emitDebugPayload(c.Request.Context(), debugStageResponseNow,
+		exchange.TranslatedRequest.Headers.Get("x-request-id"),
+		exchange.TranslatedRequest.Model, profile.ID, source, target, result.Body)
 	h.recordDiagnostics(c.Request.Context(), profile.ID, exchange.TranslatedRequest.Headers.Get("x-request-id"), source, target, result)
 	copySafeResponseHeaders(c.Writer.Header(), response.Header, profile)
 	c.Header("Content-Type", "application/json")
@@ -548,6 +615,12 @@ func (h *Handler) handleBridge(
 		h.writeError(c, source, err)
 		return
 	}
+	// resp.now: the materialized JSON body returned to the client.
+	// resp.before is intentionally skipped for bridge: the upstream SSE
+	// frames are not buffered, only translated in flight.
+	h.emitDebugPayload(c.Request.Context(), debugStageResponseNow,
+		exchange.TranslatedRequest.Headers.Get("x-request-id"),
+		exchange.TranslatedRequest.Model, profile.ID, source, target, result.Body)
 	h.recordDiagnostics(c.Request.Context(), profile.ID, exchange.TranslatedRequest.Headers.Get("x-request-id"), source, target, result)
 	copySafeResponseHeaders(c.Writer.Header(), response.Header, profile)
 	c.Header("Content-Type", "application/json")
@@ -588,16 +661,41 @@ func (c *boundedStreamCollector) Close(ctx context.Context) (model.TransformResu
 	return result, nil
 }
 
-func (h *Handler) handleUpstreamError(c *gin.Context, source model.Format, response *http.Response) {
+func (h *Handler) handleUpstreamError(
+	c *gin.Context,
+	source, target model.Format,
+	requestIDValue, routedModel, providerID string,
+	response *http.Response,
+) {
 	body, err := readBounded(response.Body, MAX_UPSTREAM_ERROR_BYTES)
 	if err != nil {
 		if errors.Is(err, errUpstreamResponseTooLarge) {
+			// resp.before: surface the upstream error path even when the
+			// body itself exceeds our cap. Emit an empty-body summary
+			// with body_truncated=true so operators can correlate the
+			// failure with the limit instead of getting a silent gap.
+			slog.LogAttrs(c.Request.Context(), slog.LevelDebug, "proxy debug payload",
+				slog.String("stage", debugStageResponseBefore),
+				slog.String("request_id", requestIDValue),
+				slog.String("model", routedModel),
+				slog.String("provider", providerID),
+				slog.String("source_format", string(source)),
+				slog.String("target_format", string(target)),
+				slog.Int("body_bytes", 0),
+				slog.Bool("body_truncated", true),
+				slog.String("body", ""),
+			)
 			h.writeError(c, source, transform.DecodeUpstreamError(response.StatusCode, response.Header, nil))
 			return
 		}
 		h.writeError(c, source, err)
 		return
 	}
+	// resp.before: capture the upstream 4xx/5xx body before decode +
+	// rewrite. logUpstreamError still emits a sanitized WARN-level
+	// record; this is the raw DEBUG snapshot.
+	h.emitDebugPayload(c.Request.Context(), debugStageResponseBefore,
+		requestIDValue, routedModel, providerID, source, target, body)
 	h.writeError(c, source, transform.DecodeUpstreamError(response.StatusCode, response.Header, body))
 }
 
@@ -626,6 +724,21 @@ func protocolStreamError(message string, cause error) *model.ProxyError {
 		Kind: model.ERROR_PROTOCOL, Status: http.StatusBadGateway,
 		Code: "protocol_error", Message: message, Cause: cause,
 	}
+}
+
+// debugErrorInfo pulls the (code, kind, message) triple out of any
+// error, falling back to "unknown" / "internal" / err.Error() when
+// the error is not a *model.ProxyError. Used by emitDebugFailure so
+// every writeError site can carry the same structured fields.
+func debugErrorInfo(err error) (code, kind, message string) {
+	var pe *model.ProxyError
+	if errors.As(err, &pe) && pe != nil {
+		return pe.Code, string(pe.Kind), pe.Message
+	}
+	if err == nil {
+		return "unknown", "internal", ""
+	}
+	return "unknown", "internal", err.Error()
 }
 
 func requestID(incoming string) string {

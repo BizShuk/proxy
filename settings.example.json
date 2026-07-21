@@ -16,6 +16,5 @@
   "stats": {
     "enabled": true
   },
-  "debug": "off",
   "cloaking": {}
 }

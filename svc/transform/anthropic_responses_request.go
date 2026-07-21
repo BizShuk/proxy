@@ -255,14 +255,37 @@ func task5AnthropicToolOutput(block anthropic.Content) (string, error) {
 	if err := json.Unmarshal(block.Content, &blocks); err != nil {
 		return "", task5InvalidRequest("decode Anthropic tool result", err)
 	}
+	// Lift non-text parts into a textual representation. Responses
+	// function_call_output only accepts a string `output`, so image
+	// / document blocks become bracketed placeholders that preserve
+	// the call shape without rejecting the whole tool_result.
 	var output strings.Builder
-	for _, part := range blocks {
-		if part.Type != "text" {
-			return "", task5Unsupported("unsupported_tool_result", "Responses function output only supports Anthropic text tool results")
+	for i, part := range blocks {
+		if i > 0 {
+			output.WriteString("\n")
 		}
-		output.WriteString(part.Text)
+		switch part.Type {
+		case "text":
+			output.WriteString(part.Text)
+		case "image":
+			output.WriteString(formatImagePlaceholder(part))
+		default:
+			fmt.Fprintf(&output, "[unsupported %s block omitted]", part.Type)
+		}
 	}
 	return output.String(), nil
+}
+
+// formatImagePlaceholder renders an Anthropic image block as a one-line
+// textual marker so the tool_result round-trip continues instead of
+// erroring out. The image bytes themselves are dropped; the marker
+// preserves type, media_type, and byte count for downstream debugging.
+func formatImagePlaceholder(part anthropic.Content) string {
+	if part.Source == nil {
+		return "[image omitted: missing source]"
+	}
+	return fmt.Sprintf("[image omitted: media_type=%s, bytes=%d]",
+		part.Source.MediaType, len(part.Source.Data))
 }
 
 func task5AnthropicTools(tools []anthropic.Tool) ([]responses.Tool, error) {
