@@ -66,6 +66,26 @@ func TestStreamCollectorRejectsFailureEvent(t *testing.T) {
 	assert.Equal(t, model.ERROR_PROTOCOL, proxyErr.Kind)
 }
 
+func TestAnthropicCollectorPushErrorFrame(t *testing.T) {
+	t.Run("captures error details", func(t *testing.T) {
+		collector, err := NewStreamCollector(model.FORMAT_ANTHROPIC_MESSAGES, model.Exchange{
+			OriginalRequest: model.RequestEnvelope{Model: "openai/gpt-5.5"},
+		})
+		require.NoError(t, err)
+		err = collector.Push(context.Background(), model.SSEFrame{
+			Event: "error",
+			Data: []byte(`{"type":"error","error":{"type":"upstream_error","message":"boom","code":"context_overflow"}}`),
+		})
+		var proxyErr *model.ProxyError
+		require.ErrorAs(t, err, &proxyErr)
+		assert.Equal(t, model.ERROR_UPSTREAM, proxyErr.Kind)
+		assert.Equal(t, "context_overflow", proxyErr.Code)
+		assert.Equal(t, "context_overflow", proxyErr.UpstreamErrorCode)
+		assert.Equal(t, "boom", proxyErr.UpstreamErrorMessage)
+		assert.Equal(t, "upstream_error", proxyErr.UpstreamErrorType)
+	})
+}
+
 func collectorAnthropicFrames() []model.SSEFrame {
 	return []model.SSEFrame{
 		{Event: "message_start", Data: []byte(`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude","content":[],"usage":{"input_tokens":10,"output_tokens":0}}}`)},

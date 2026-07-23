@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/bizshuk/proxy/model"
@@ -107,4 +108,46 @@ func (h *Handler) emitDebugFailure(
 		slog.Bool("body_truncated", truncated),
 		slog.String("body", string(capped)),
 	)
+}
+
+func (h *Handler) emitBridgeFailure(
+	ctx context.Context,
+	requestIDValue, routedModel, providerID string,
+	sourceFormat, targetFormat model.Format,
+	bridgeStep, upstreamEvent string,
+	upstreamBytes int64,
+	err error,
+) {
+	if h == nil {
+		return
+	}
+	code, kind, message := debugErrorInfo(err)
+	slog.LogAttrs(ctx, slog.LevelDebug, "proxy debug payload",
+		slog.String("stage", debugStageRequestFailed),
+		slog.String("request_id", requestIDValue),
+		slog.String("model", routedModel),
+		slog.String("provider", providerID),
+		slog.String("source_format", string(sourceFormat)),
+		slog.String("target_format", string(targetFormat)),
+		slog.String("bridge_step", bridgeStep),
+		slog.String("upstream_event", upstreamEvent),
+		slog.Int64("upstream_bytes", upstreamBytes),
+		slog.String("error_code", code),
+		slog.String("error_kind", kind),
+		slog.String("error_message", message),
+		slog.String("error_cause", rootErrorMessage(err)),
+	)
+}
+
+func rootErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	for {
+		cause := errors.Unwrap(err)
+		if cause == nil {
+			return err.Error()
+		}
+		err = cause
+	}
 }

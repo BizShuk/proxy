@@ -1,11 +1,11 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"bytes"
 	"io"
 	"log/slog"
 	"mime"
@@ -67,8 +67,8 @@ func NewHandler(deps HandlerDeps) (*Handler, error) {
 	}
 	return &Handler{
 		router: deps.Router, registry: deps.Registry, catalog: deps.Catalog,
-		dispatcher:   deps.Dispatcher,
-		credentials:  deps.Credentials, client: deps.Client, observer: deps.Observer,
+		dispatcher:  deps.Dispatcher,
+		credentials: deps.Credentials, client: deps.Client, observer: deps.Observer,
 		maxBodyBytes: deps.MaxBodyBytes,
 	}, nil
 }
@@ -551,6 +551,15 @@ func (h *Handler) handleBridge(
 	exchange model.Exchange,
 	response *http.Response,
 ) {
+	requestIDValue := exchange.TranslatedRequest.Headers.Get("x-request-id")
+	var lastUpstreamEvent string
+	var upstreamBytes int64
+	fail := func(step string, err error) {
+		h.emitBridgeFailure(c.Request.Context(),
+			requestIDValue, exchange.TranslatedRequest.Model, profile.ID,
+			source, target, step, lastUpstreamEvent, upstreamBytes, err)
+		h.writeError(c, source, err)
+	}
 	if c.Request.Context().Err() != nil {
 		h.logStreamError(c.Request.Context(),
 			exchange.TranslatedRequest.Headers.Get("x-request-id"),
@@ -558,17 +567,18 @@ func (h *Handler) handleBridge(
 		return
 	}
 	if !acceptsEventStream(profile, response.Header.Get("Content-Type")) {
-		h.writeError(c, source, protocolStreamError("upstream did not return an event stream", nil))
+		err := protocolStreamError("upstream did not return an event stream", nil)
+		fail("content_type", err)
 		return
 	}
 	stream, err := pair.NewStream(exchange)
 	if err != nil {
-		h.writeError(c, source, err)
+		fail("stream_create", err)
 		return
 	}
 	collector, err := transform.NewStreamCollector(source, exchange)
 	if err != nil {
-		h.writeError(c, source, err)
+		fail("collector_create", err)
 		return
 	}
 	boundedCollector := newBoundedStreamCollector(collector, h.maxBodyBytes)
@@ -576,43 +586,47 @@ func (h *Handler) handleBridge(
 	decoder := model.NewBoundedSSEDecoder(upstreamBody, h.maxBodyBytes)
 	for {
 		frame, decodeErr := decoder.Next()
+		upstreamBytes = h.maxBodyBytes + 1 - upstreamBody.N
 		if errors.Is(decodeErr, io.EOF) {
 			if upstreamBody.N == 0 {
-				h.writeError(c, source, protocolStreamError("upstream event stream exceeds limit", errUpstreamResponseTooLarge))
+				err := protocolStreamError("upstream event stream exceeds limit", errUpstreamResponseTooLarge)
+				fail("raw_limit", err)
 				return
 			}
 			break
 		}
 		if decodeErr != nil {
-			h.writeError(c, source, protocolStreamError("cannot decode upstream event stream", decodeErr))
+			err := protocolStreamError("cannot decode upstream event stream", decodeErr)
+			fail("sse_decode", err)
 			return
 		}
+		lastUpstreamEvent = frame.Event
 		frames, pushErr := stream.Push(c.Request.Context(), frame)
 		if pushErr != nil {
-			h.writeError(c, source, pushErr)
+			fail("stream_push", pushErr)
 			return
 		}
 		for _, translatedFrame := range frames {
 			if err := boundedCollector.Push(c.Request.Context(), translatedFrame); err != nil {
-				h.writeError(c, source, err)
+				fail("collector_push", err)
 				return
 			}
 		}
 	}
 	closing, err := stream.Close(c.Request.Context())
 	if err != nil {
-		h.writeError(c, source, err)
+		fail("stream_close", err)
 		return
 	}
 	for _, frame := range closing {
 		if err := boundedCollector.Push(c.Request.Context(), frame); err != nil {
-			h.writeError(c, source, err)
+			fail("collector_push_close", err)
 			return
 		}
 	}
 	result, err := boundedCollector.Close(c.Request.Context())
 	if err != nil {
-		h.writeError(c, source, err)
+		fail("collector_close", err)
 		return
 	}
 	// resp.now: the materialized JSON body returned to the client.

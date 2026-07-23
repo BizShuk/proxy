@@ -516,6 +516,29 @@ func TestHandlerNonStreamBridgeDoesNotCommitPartialSSE(t *testing.T) {
 	assert.NotContains(t, response.Body.String(), "response.created")
 }
 
+func TestHandlerNonStreamBridgeLogsFailureCause(t *testing.T) {
+	logs := withSlogTee(t, slog.LevelDebug)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n")
+	}))
+	defer server.Close()
+	handler := newHandlerForCredential(t, oauthCred("openai", server.URL), server.Client())
+	router := gin.New()
+	router.POST("/model", handler.Handle(model.FORMAT_ANTHROPIC_MESSAGES))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model", bytes.NewReader(requestBody(model.FORMAT_ANTHROPIC_MESSAGES, "openai/gpt-5", false))))
+
+	require.Equal(t, http.StatusBadGateway, response.Code)
+	out := logs.String()
+	assert.Contains(t, out, `"stage":"req.failed"`)
+	assert.Contains(t, out, `"bridge_step":"stream_close"`)
+	assert.Contains(t, out, `"upstream_event":"response.created"`)
+	assert.Contains(t, out, `"upstream_bytes":`)
+	assert.Contains(t, out, `"error_code":"protocol_error"`)
+	assert.Contains(t, out, `"error_cause":"responses to anthropic stream: stream ended before terminal event"`)
+}
+
 func TestHandlerNonStreamBridgeRejectsUpstreamSSETotalOverLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

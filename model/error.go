@@ -24,13 +24,16 @@ const (
 
 // ProxyError is the protocol-neutral error exchanged between proxy layers.
 type ProxyError struct {
-	Kind              ErrorKind
-	Status            int
-	Code              string
-	Message           string
-	RetryAfter        time.Duration
-	UpstreamRequestID string
-	Cause             error
+	Kind                  ErrorKind
+	Status                int
+	Code                  string
+	Message               string
+	RetryAfter            time.Duration
+	UpstreamRequestID     string
+	UpstreamErrorCode     string
+	UpstreamErrorMessage  string
+	UpstreamErrorType     string
+	Cause                 error
 }
 
 // Error implements error.

@@ -164,7 +164,7 @@ func (c *anthropicCollector) Push(ctx context.Context, frame model.SSEFrame) err
 		}
 		c.terminal = true
 	case "error":
-		return protocolFailure(fmt.Errorf("Anthropic stream failed"))
+		return upstreamErrorProxyError(frame.Data)
 	case "ping", "":
 		return nil
 	default:

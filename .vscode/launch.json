@@ -1,0 +1,38 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "proxy: debug (port 8317)",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "LOG_LEVEL": "debug"
+            },
+            "args": [],
+            "buildFlags": [],
+            "showLog": false,
+            "detail": "Debug proxy server under dlv dap with LOG_LEVEL=debug — breakpoints live across handlers/, svc/, model/. Long-running daemon: do NOT use stopOnEntry; F5 to start, breakpoints hot before next request."
+        },
+        {
+            "name": "proxy: debug (port 8318)",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "LOG_LEVEL": "debug"
+            },
+            "args": [
+                "--port",
+                "8318"
+            ],
+            "buildFlags": [],
+            "showLog": false,
+            "detail": "Debug proxy server under dlv dap on port 8318 (LOG_LEVEL=debug) — paired alt-port for side-by-side prod server (port 8317)."
+        }
+    ]
+}
