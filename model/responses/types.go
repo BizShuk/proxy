@@ -48,14 +48,16 @@ func (c *ContentList) UnmarshalJSON(data []byte) error {
 
 // InputItem is one Responses request input item.
 type InputItem struct {
-	ID        string      `json:"id,omitempty"`
-	Type      string      `json:"type,omitempty"`
-	Role      string      `json:"role,omitempty"`
-	Content   ContentList `json:"content,omitempty"`
-	CallID    string      `json:"call_id,omitempty"`
-	Name      string      `json:"name,omitempty"`
-	Arguments string      `json:"arguments,omitempty"`
-	Output    string      `json:"output,omitempty"`
+	ID               string      `json:"id,omitempty"`
+	Type             string      `json:"type,omitempty"`
+	Role             string      `json:"role,omitempty"`
+	Content          ContentList `json:"content,omitempty"`
+	Summary          ContentList `json:"summary,omitempty"`
+	EncryptedContent string      `json:"encrypted_content,omitempty"`
+	CallID           string      `json:"call_id,omitempty"`
+	Name             string      `json:"name,omitempty"`
+	Arguments        string      `json:"arguments,omitempty"`
+	Output           string      `json:"output,omitempty"`
 }
 
 // Tool defines one Responses tool.
@@ -89,15 +91,16 @@ type Request struct {
 
 // OutputItem is one Responses output item.
 type OutputItem struct {
-	ID        string      `json:"id,omitempty"`
-	Type      string      `json:"type"`
-	Role      string      `json:"role,omitempty"`
-	Status    string      `json:"status,omitempty"`
-	Content   ContentList `json:"content,omitempty"`
-	Summary   ContentList `json:"summary,omitempty"`
-	CallID    string      `json:"call_id,omitempty"`
-	Name      string      `json:"name,omitempty"`
-	Arguments string      `json:"arguments,omitempty"`
+	ID               string      `json:"id,omitempty"`
+	Type             string      `json:"type"`
+	Role             string      `json:"role,omitempty"`
+	Status           string      `json:"status,omitempty"`
+	Content          ContentList `json:"content,omitempty"`
+	Summary          ContentList `json:"summary,omitempty"`
+	EncryptedContent string      `json:"encrypted_content,omitempty"`
+	CallID           string      `json:"call_id,omitempty"`
+	Name             string      `json:"name,omitempty"`
+	Arguments        string      `json:"arguments,omitempty"`
 }
 
 // InputTokensDetails contains Responses cached-token usage.

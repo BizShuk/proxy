@@ -2,6 +2,7 @@ package model
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -34,6 +35,7 @@ type SSEDecoder struct {
 	reader        *bufio.Reader
 	maxLineBytes  int64
 	maxFrameBytes int64
+	atStreamStart bool
 }
 
 // NewSSEDecoder returns a full-frame SSE decoder.
@@ -47,6 +49,7 @@ func NewBoundedSSEDecoder(reader io.Reader, maxBytes int64) *SSEDecoder {
 		reader:        bufio.NewReader(reader),
 		maxLineBytes:  maxBytes,
 		maxFrameBytes: maxBytes,
+		atStreamStart: true,
 	}
 }
 
@@ -71,6 +74,10 @@ func (d *SSEDecoder) Next() (SSEFrame, error) {
 		frameBytes += int64(len(lineBytes))
 		if frameBytes > d.maxFrameBytes {
 			return SSEFrame{}, fmt.Errorf("%w: limit %d bytes", ErrSSEFrameTooLarge, d.maxFrameBytes)
+		}
+		if d.atStreamStart {
+			d.atStreamStart = false
+			lineBytes = bytes.TrimPrefix(lineBytes, []byte{0xEF, 0xBB, 0xBF})
 		}
 		if len(lineBytes) > 0 {
 			line := string(lineBytes)

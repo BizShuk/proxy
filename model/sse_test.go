@@ -33,6 +33,13 @@ func TestSSEDecoderReturnsEOFWhenEmpty(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 }
 
+func TestSSEDecoderStripsUTF8BOM(t *testing.T) {
+	frame, err := NewSSEDecoder(strings.NewReader("\xef\xbb\xbfevent: message_start\ndata: {}\n\n")).Next()
+	require.NoError(t, err)
+	assert.Equal(t, "message_start", frame.Event)
+	assert.JSONEq(t, `{}`, string(frame.Data))
+}
+
 func TestSSEDecoderRejectsLineOverLimit(t *testing.T) {
 	raw := "data: " + strings.Repeat("x", 32) + "\n\n"
 	_, err := NewBoundedSSEDecoder(strings.NewReader(raw), 20).Next()

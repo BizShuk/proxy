@@ -10,6 +10,7 @@ import (
 
 	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/proxy/model"
+	"github.com/bizshuk/proxy/model/anthropic"
 	"github.com/bizshuk/proxy/model/chat"
 	"github.com/bizshuk/proxy/model/responses"
 	"github.com/bizshuk/proxy/svc/route"
@@ -25,7 +26,19 @@ const (
 	// (e.g., gpt-5.6-sol returns 400 if version is too old).
 	DEFAULT_CODEX_VERSION = "0.144.1"
 
-	ANTHROPIC_VERSION = "2023-06-01"
+	ANTHROPIC_VERSION            = "2023-06-01"
+	XAI_GROK_OAUTH_PROFILE_ID    = "xai-grok-oauth"
+	XAI_GROK_OAUTH_BASE_URL      = "https://cli-chat-proxy.grok.com/v1"
+	XAI_GROK_DEFAULT_MAX_TOKENS  = 128_000
+	XAI_GROK_ENCRYPTED_REASONING = "reasoning.encrypted_content"
+
+	XAI_GROK_TOKEN_AUTH_HEADER            = "X-XAI-Token-Auth"
+	XAI_GROK_TOKEN_AUTH_VALUE             = "xai-grok-cli"
+	XAI_GROK_AUTHENTICATE_RESPONSE_HEADER = "x-authenticateresponse"
+	XAI_GROK_AUTHENTICATE_RESPONSE_VALUE  = "authenticate-response"
+	DEFAULT_XAI_GROK_CLIENT_VERSION       = "0.2.112"
+	DEFAULT_XAI_GROK_CLIENT_IDENTIFIER    = "proxy"
+	DEFAULT_XAI_GROK_CLIENT_MODE          = "headless"
 )
 
 var codexResponsesLiteModels = map[string]struct{}{
@@ -176,12 +189,22 @@ func (c *Catalog) NewRouter() (*route.Router, error) {
 func (c *Catalog) ResolveProfile(providerFamily string, credentialKind authmodel.Kind, forcedTarget *model.Format) (Profile, model.Format, error) {
 	family := strings.ToLower(strings.TrimSpace(providerFamily))
 	profileID := family
-	if family == "openai" {
+	switch family {
+	case "openai":
 		switch credentialKind {
 		case authmodel.KIND_API_KEY:
 			profileID = "openai-api"
 		case authmodel.KIND_OAUTH:
 			profileID = "openai-codex-oauth"
+		default:
+			return Profile{}, "", unsupportedCredentialError(family, credentialKind)
+		}
+	case "xai":
+		switch credentialKind {
+		case authmodel.KIND_API_KEY:
+			profileID = "xai"
+		case authmodel.KIND_OAUTH:
+			profileID = XAI_GROK_OAUTH_PROFILE_ID
 		default:
 			return Profile{}, "", unsupportedCredentialError(family, credentialKind)
 		}
@@ -210,6 +233,11 @@ func (c *Catalog) ResolveProfile(providerFamily string, credentialKind authmodel
 func DefaultCatalog() (*Catalog, error) {
 	defaultRequestHeaders := []string{"x-request-id", "traceparent", "tracestate"}
 	defaultResponseHeaders := []string{"content-type", "retry-after", "x-request-id", "request-id", "cf-ray"}
+	xaiRouting := route.Profile{
+		ID:         "xai",
+		Qualifiers: []string{"xai", "xai-responses", "xai-chat", "xai-messages"},
+		Prefixes:   []string{"grok-"},
+	}
 	profiles := []Profile{
 		{
 			ID:                     "anthropic",
@@ -271,7 +299,7 @@ func DefaultCatalog() (*Catalog, error) {
 		},
 		{
 			ID:                 "xai",
-			Routing:            route.Profile{ID: "xai", Qualifiers: []string{"xai", "xai-chat"}, Prefixes: []string{"grok-"}},
+			Routing:            xaiRouting,
 			CredentialProvider: "xai",
 			BaseURL:            "https://api.x.ai",
 			Endpoints: map[model.Format]string{
@@ -284,6 +312,35 @@ func DefaultCatalog() (*Catalog, error) {
 			AllowedResponseHeaders: slices.Clone(defaultResponseHeaders),
 			AdvertisedModels:       []string{"grok-"},
 			NormalizeRequest:       normalizeXAIRequest,
+		},
+		{
+			ID:                 XAI_GROK_OAUTH_PROFILE_ID,
+			Routing:            xaiRouting,
+			CredentialProvider: "xai",
+			BaseURL:            XAI_GROK_OAUTH_BASE_URL,
+			Endpoints: map[model.Format]string{
+				model.FORMAT_OPENAI_RESPONSES:   "/responses",
+				model.FORMAT_OPENAI_CHAT:        "/chat/completions",
+				model.FORMAT_ANTHROPIC_MESSAGES: "/messages",
+			},
+			Preferred:  model.FORMAT_OPENAI_RESPONSES,
+			AuthScheme: AUTH_BEARER,
+			AllowedRequestHeaders: append(slices.Clone(defaultRequestHeaders),
+				"x-grok-conv-id",
+				"x-grok-req-id",
+				"x-grok-session-id",
+				"x-grok-turn-idx",
+				"x-grok-agent-id",
+				"x-grok-deployment-id",
+			),
+			AllowedResponseHeaders: append(slices.Clone(defaultResponseHeaders),
+				"x-grok-context-window",
+				"x-grok-max-completion-tokens",
+				"x-models-etag",
+				"x-should-retry",
+			),
+			AdvertisedModels: []string{"grok-"},
+			NormalizeRequest: normalizeXAIGrokOAuthRequest,
 		},
 		{
 			ID:                 "google",
@@ -426,6 +483,102 @@ func normalizeXAIRequest(envelope model.RequestEnvelope) (NormalizedRequest, err
 		return NormalizedRequest{}, unsupportedFormatError("xai", envelope.TargetFormat)
 	}
 	return preserveRequest(envelope)
+}
+
+func normalizeXAIGrokOAuthRequest(envelope model.RequestEnvelope) (NormalizedRequest, error) {
+	var body map[string]any
+	if err := json.Unmarshal(envelope.Body, &body); err != nil {
+		return NormalizedRequest{}, invalidRequestError("normalize xAI Grok OAuth request", err)
+	}
+	if body == nil {
+		return NormalizedRequest{}, invalidRequestError("normalize xAI Grok OAuth request", fmt.Errorf("JSON object is required"))
+	}
+
+	switch envelope.TargetFormat {
+	case model.FORMAT_OPENAI_RESPONSES:
+		if _, err := responses.DecodeRequest(envelope.Body); err != nil {
+			return NormalizedRequest{}, invalidRequestError("normalize xAI Grok OAuth Responses request", err)
+		}
+		if value, exists := body["store"]; !exists || value == nil {
+			body["store"] = false
+		}
+		if err := ensureJSONArrayContainsString(body, "include", XAI_GROK_ENCRYPTED_REASONING); err != nil {
+			return NormalizedRequest{}, invalidRequestError("normalize xAI Grok OAuth Responses request", err)
+		}
+		if envelope.Stream {
+			body["stream"] = true
+		}
+	case model.FORMAT_OPENAI_CHAT:
+		if _, err := chat.DecodeRequest(envelope.Body); err != nil {
+			return NormalizedRequest{}, invalidRequestError("normalize xAI Grok OAuth Chat request", err)
+		}
+		if envelope.Stream {
+			body["stream"] = true
+			options, err := objectField(body, "stream_options")
+			if err != nil {
+				return NormalizedRequest{}, invalidRequestError("normalize xAI Grok OAuth Chat request", err)
+			}
+			options["include_usage"] = true
+			body["stream_options"] = options
+		}
+	case model.FORMAT_ANTHROPIC_MESSAGES:
+		request, err := anthropic.DecodeRequest(envelope.Body)
+		if err != nil {
+			return NormalizedRequest{}, invalidRequestError("normalize xAI Grok OAuth Messages request", err)
+		}
+		if request.MaxTokens == 0 {
+			body["max_tokens"] = XAI_GROK_DEFAULT_MAX_TOKENS
+		}
+		if envelope.Stream {
+			body["stream"] = true
+		}
+	default:
+		return NormalizedRequest{}, unsupportedFormatError(XAI_GROK_OAUTH_PROFILE_ID, envelope.TargetFormat)
+	}
+
+	normalizedBody, err := json.Marshal(body)
+	if err != nil {
+		return NormalizedRequest{}, fmt.Errorf("normalize xAI Grok OAuth request: %w", err)
+	}
+	return NormalizedRequest{
+		Body:           normalizedBody,
+		UpstreamStream: envelope.Stream,
+	}, nil
+}
+
+func ensureJSONArrayContainsString(body map[string]any, field, required string) error {
+	raw, exists := body[field]
+	if !exists || raw == nil {
+		body[field] = []any{required}
+		return nil
+	}
+	values, ok := raw.([]any)
+	if !ok {
+		return fmt.Errorf("%s must be an array", field)
+	}
+	for _, value := range values {
+		item, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("%s must contain only strings", field)
+		}
+		if item == required {
+			return nil
+		}
+	}
+	body[field] = append(values, required)
+	return nil
+}
+
+func objectField(body map[string]any, field string) (map[string]any, error) {
+	raw, exists := body[field]
+	if !exists || raw == nil {
+		return make(map[string]any), nil
+	}
+	value, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be an object", field)
+	}
+	return value, nil
 }
 
 func normalizeConcreteProfile(source Profile) (Profile, error) {

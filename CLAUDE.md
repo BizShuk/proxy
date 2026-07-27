@@ -81,6 +81,14 @@ proxy/
 - `MAX_UPSTREAM_ERROR_BYTES = 64<<10`：日誌最多印 64 KiB 上游錯誤 body；超出部分以 `body_truncated: true` 標記 + `body_bytes` 計數。
 - `sensitiveHeaders` deny-list：`authorization` / `proxy-authorization` / `cookie` / `set-cookie` / `x-api-key` / `api-key` / `x-auth-token` / `x-amz-security-token` 等 8 個 key 永不寫進日誌。
 - Codex OAuth payload 脫敏：只印 `model` / `stream` / `store` / `instructions_bytes` / `has_instructions` / `input_roles` / `tool_names` / `parallel_tool_calls`，原始 `instructions` 與 `input[].content` 絕不進 slog。
+- xAI credential kind 決定具體 profile：API key 選 `xai` (`https://api.x.ai`)，OAuth 選 `xai-grok-oauth` (`https://cli-chat-proxy.grok.com/v1`)；兩者共享 `xai` routing family，不能讓 OAuth token 誤送公開 API。
+- `xai-grok-oauth` 對齊 `grok-build` 的三種 inference protocol：`/responses`、`/chat/completions`、`/messages`。`xai-responses` / `xai-chat` / `xai-messages` qualifier 強制 target format；無 format qualifier 時偏好 Responses。
+- Grok OAuth request 固定由 `Client.do` 注入 bearer、`X-XAI-Token-Auth`、`x-authenticateresponse`、`x-grok-client-*` 與 request metadata；downstream 只能傳 conversation/session/turn/agent/deployment tracking 欄位，不能覆寫 auth、client identity、routed model 或 credential user identity。
+- Grok response metadata (`x-grok-context-window` / `x-grok-max-completion-tokens` / `x-models-etag` / `x-should-retry`) 列入 profile allowlist；成功走 `copySafeResponseHeaders`，4xx/5xx 走會移除 upstream content type 的 `copySafeErrorResponseHeaders`。
+- `normalizeXAIGrokOAuthRequest` 保留 xAI-specific raw tools；Responses 預設 `store:false` + `reasoning.encrypted_content`，streaming Chat 合併 `stream_options.include_usage:true`，Messages 缺少 `max_tokens` 時用 `128000`。
+- Anthropic `thinking` 與 Responses typed `reasoning` 必須對稱：`id` / `summary` / `encrypted_content` 以版本化 `thinking.signature` 保存，SSE 在 reasoning item 完成時送 `signature_delta`；非本 proxy 產生的 Anthropic signature 只記 semantic loss，不冒充 Responses encrypted state。
+- `SSEDecoder` 只在 stream 開頭移除 UTF-8 BOM；這是 Grok 三種 streaming endpoint 的共同相容需求，不放進個別 transform。
+- auth storage provider ID 是 `xai`，Agents SDK provider ID 是 `grok`；`BuildProvider` 負責這個邊界映射，`familiesInDefaultOrder` 必須向 resolver 查 `xai`。
 
 ## 模組對應 (Module Mapping)
 
@@ -152,7 +160,7 @@ go test ./...
 - Naming:
     - `model.Format` 用小寫 hyphenated 字串 (`"openai-chat"`、`"anthropic-messages"`、`"openai-responses"`)
     - 常數使用 `SCREAMING_SNAKE_CASE` (例如 `MAX_UPSTREAM_ERROR_BYTES`、`ANTHROPIC_OAUTH_BETA`)
-    - Profile ID 一律小寫無空白 (例如 `anthropic`、`openai-codex-oauth`、`minimax`)
+    - Profile ID 一律小寫無空白 (例如 `anthropic`、`openai-codex-oauth`、`xai-grok-oauth`、`minimax`)
 - Error handling:
     - 內部錯誤統一用 `*model.ProxyError` (Kind/Status/Code/Message/Cause)，`writeError` 依 `format` 編碼回來源格式
     - `Kind` 透過 `StatusCode()` 取得 HTTP status，並透過 `publicErrorType` 映射為 wire error type (`invalid_request_error` / `authentication_error` / `rate_limit_error` / `api_error`)

@@ -73,8 +73,15 @@ func (r *Router) Resolve(sourceFormat model.Format, modelName string) (Route, er
 			Model:        routedModel,
 			SourceFormat: sourceFormat,
 		}
-		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(qualifier)), "-chat") {
+		switch {
+		case strings.HasSuffix(strings.ToLower(strings.TrimSpace(qualifier)), "-responses"):
+			forced := model.FORMAT_OPENAI_RESPONSES
+			route.ForcedTarget = &forced
+		case strings.HasSuffix(strings.ToLower(strings.TrimSpace(qualifier)), "-chat"):
 			forced := model.FORMAT_OPENAI_CHAT
+			route.ForcedTarget = &forced
+		case strings.HasSuffix(strings.ToLower(strings.TrimSpace(qualifier)), "-messages"):
+			forced := model.FORMAT_ANTHROPIC_MESSAGES
 			route.ForcedTarget = &forced
 		}
 		return route, nil

@@ -86,6 +86,103 @@ func TestAnthropicToResponsesPreservesInstructionMessageRoles(t *testing.T) {
 	assert.Equal(t, "user", items[2].Role)
 }
 
+func TestAnthropicToResponsesPreservesThinkingAsReasoningInput(t *testing.T) {
+	body := []byte(`{
+		"model":"grok-4.5-latest",
+		"messages":[
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"I should inspect the workspace.","signature":""},
+				{"type":"tool_use","id":"call_1","name":"Bash","input":{"command":"pwd"}}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"call_1","content":"workspace path"}
+			]}
+		]
+	}`)
+
+	result, err := AnthropicToResponsesRequest(context.Background(), model.RequestEnvelope{
+		Model: "grok-4.5-latest", Stream: true, Body: body,
+	})
+	require.NoError(t, err)
+
+	request, err := responses.DecodeRequest(result.Body)
+	require.NoError(t, err)
+	var input []map[string]any
+	require.NoError(t, json.Unmarshal(request.Input, &input))
+	require.Len(t, input, 3)
+	assert.Equal(t, "reasoning", input[0]["type"])
+	assert.Equal(t, []any{
+		map[string]any{"type": "summary_text", "text": "I should inspect the workspace."},
+	}, input[0]["summary"])
+	assert.Equal(t, "function_call", input[1]["type"])
+	assert.Equal(t, "function_call_output", input[2]["type"])
+}
+
+func TestResponsesReasoningRoundTripPreservesMetadata(t *testing.T) {
+	responseBody := []byte(`{
+		"id":"resp_1",
+		"object":"response",
+		"model":"grok-4.5-latest",
+		"status":"completed",
+		"output":[
+			{
+				"id":"reasoning_1",
+				"type":"reasoning",
+				"summary":[{"type":"summary_text","text":"I should inspect the workspace."}],
+				"encrypted_content":"encrypted-reasoning"
+			},
+			{
+				"id":"fc_1",
+				"type":"function_call",
+				"call_id":"call_1",
+				"name":"Bash",
+				"arguments":"{\"command\":\"pwd\"}"
+			}
+		]
+	}`)
+
+	anthropicResult, err := ResponsesToAnthropicResponse(context.Background(), model.ResponseEnvelope{
+		Body: responseBody,
+		Exchange: model.Exchange{
+			OriginalRequest: model.RequestEnvelope{Model: "grok-4.5-latest"},
+		},
+	})
+	require.NoError(t, err)
+	anthropicResponse, err := anthropic.DecodeResponse(anthropicResult.Body)
+	require.NoError(t, err)
+	require.Len(t, anthropicResponse.Content, 2)
+	require.Equal(t, "thinking", anthropicResponse.Content[0].Type)
+	require.NotEmpty(t, anthropicResponse.Content[0].Signature)
+
+	requestBody, err := anthropic.Encode(anthropic.Request{
+		Model: "grok-4.5-latest",
+		Messages: []anthropic.Message{
+			{Role: "assistant", Content: anthropicResponse.Content},
+			{Role: "user", Content: anthropic.ContentList{{
+				Type: "tool_result", ToolUseID: "call_1", Content: json.RawMessage(`"workspace path"`),
+			}}},
+		},
+	})
+	require.NoError(t, err)
+
+	responsesResult, err := AnthropicToResponsesRequest(context.Background(), model.RequestEnvelope{
+		Model: "grok-4.5-latest", Stream: true, Body: requestBody,
+	})
+	require.NoError(t, err)
+	responsesRequest, err := responses.DecodeRequest(responsesResult.Body)
+	require.NoError(t, err)
+	var input []map[string]any
+	require.NoError(t, json.Unmarshal(responsesRequest.Input, &input))
+	require.Len(t, input, 3)
+	assert.Equal(t, "reasoning_1", input[0]["id"])
+	assert.Equal(t, "encrypted-reasoning", input[0]["encrypted_content"])
+	assert.Equal(t, []any{
+		map[string]any{"type": "summary_text", "text": "I should inspect the workspace."},
+	}, input[0]["summary"])
+	assert.Equal(t, "function_call", input[1]["type"])
+	assert.Equal(t, "function_call_output", input[2]["type"])
+}
+
 func TestResponsesToAnthropicRejectsPreviousResponseWithoutHistory(t *testing.T) {
 	body := []byte(`{"model":"gpt","previous_response_id":"resp_1","input":[{"role":"user","content":"next"}]}`)
 	_, err := ResponsesToAnthropicRequest(context.Background(), model.RequestEnvelope{Model: "claude", Body: body})

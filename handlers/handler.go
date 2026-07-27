@@ -211,6 +211,7 @@ func (h *Handler) Handle(format model.Format) gin.HandlerFunc {
 		}
 		defer response.Body.Close()
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			copySafeErrorResponseHeaders(c.Writer.Header(), response.Header, profile)
 			body := h.logUpstreamError(c.Request.Context(), requestID, routed.Model, profile.ID, response)
 			response.Body = io.NopCloser(bytes.NewReader(body))
 			h.handleUpstreamError(c, format, targetFormat, requestID, routed.Model, profile.ID, response)
@@ -346,6 +347,7 @@ func (h *Handler) HandleCountTokens() gin.HandlerFunc {
 		}
 		defer response.Body.Close()
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			copySafeErrorResponseHeaders(c.Writer.Header(), response.Header, profile)
 			body := h.logUpstreamError(c.Request.Context(), requestID, routed.Model, profile.ID, response)
 			response.Body = io.NopCloser(bytes.NewReader(body))
 			h.handleUpstreamError(c, model.FORMAT_ANTHROPIC_MESSAGES, model.FORMAT_ANTHROPIC_MESSAGES,
@@ -793,6 +795,13 @@ func copySafeResponseHeaders(target, source http.Header, profile upstream.Profil
 			target.Add(name, value)
 		}
 	}
+}
+
+func copySafeErrorResponseHeaders(target, source http.Header, profile upstream.Profile) {
+	copySafeResponseHeaders(target, source, profile)
+	// The proxy rewrites upstream failures into a source-format JSON error.
+	// Never retain an upstream content type that describes the discarded body.
+	target.Del("Content-Type")
 }
 
 func (h *Handler) readRequestBody(c *gin.Context) ([]byte, error) {

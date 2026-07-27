@@ -71,6 +71,17 @@ func TestBuildProviderAPIKeyCodex(t *testing.T) {
 	assert.Equal(t, "codex", p.ID())
 }
 
+func TestBuildProviderAPIKeyXAI(t *testing.T) {
+	cred := &authmodel.Credential{
+		Provider: "xai",
+		Kind:     authmodel.KIND_API_KEY,
+		APIKey:   "xai-test",
+	}
+	p, err := BuildProvider(cred)
+	require.NoError(t, err)
+	assert.Equal(t, "grok", p.ID())
+}
+
 func TestBuildProviderOAuthAnthropic(t *testing.T) {
 	cred := &authmodel.Credential{
 		Provider:     "anthropic",
@@ -112,9 +123,9 @@ func TestBuildProviderOAuthAntigravityWithEmail(t *testing.T) {
 	assert.Equal(t, "antigravity", p.ID())
 }
 
-func TestBuildProviderOAuthGrok(t *testing.T) {
+func TestBuildProviderOAuthXAI(t *testing.T) {
 	cred := &authmodel.Credential{
-		Provider:     "grok",
+		Provider:     "xai",
 		Kind:         authmodel.KIND_OAUTH,
 		AccessToken:  "oauth-grok",
 		RefreshToken: "refresh-grok",
@@ -185,7 +196,7 @@ func TestNewDispatcherWithAuthResolvesAllFamilies(t *testing.T) {
 	resolver := newStubResolver(
 		&authmodel.Credential{Provider: "anthropic", Kind: authmodel.KIND_API_KEY, APIKey: "sk-a"},
 		&authmodel.Credential{Provider: "codex", Kind: authmodel.KIND_OAUTH, AccessToken: "tok-c", RefreshToken: "ref-c", ExpiresAt: expires},
-		&authmodel.Credential{Provider: "grok", Kind: authmodel.KIND_OAUTH, AccessToken: "tok-g", RefreshToken: "ref-g", ExpiresAt: expires},
+		&authmodel.Credential{Provider: "xai", Kind: authmodel.KIND_OAUTH, AccessToken: "tok-g", RefreshToken: "ref-g", ExpiresAt: expires},
 	)
 	d, err := NewDispatcherWithAuth(resolver)
 	require.NoError(t, err)
@@ -210,7 +221,7 @@ func TestNewDispatcherWithAuthSkipsFamiliesWithMalformedCredentials(t *testing.T
 	resolver := newStubResolver(
 		&authmodel.Credential{Provider: "anthropic", Kind: authmodel.KIND_API_KEY, APIKey: ""},
 		&authmodel.Credential{Provider: "codex", Kind: authmodel.KIND_OAUTH, AccessToken: "ok"},
-		&authmodel.Credential{Provider: "grok", Kind: authmodel.KIND_API_KEY, APIKey: "ok"},
+		&authmodel.Credential{Provider: "xai", Kind: authmodel.KIND_API_KEY, APIKey: "ok"},
 	)
 	d, err := NewDispatcherWithAuth(resolver)
 	require.NoError(t, err)

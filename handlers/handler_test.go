@@ -33,11 +33,12 @@ type recordingObserver struct {
 }
 
 type handlerProviderCase struct {
-	name           string
-	credential     *authmodel.Credential
-	qualifiedModel string
-	wantPath       string
-	wantModel      string
+	name             string
+	credential       *authmodel.Credential
+	qualifiedModel   string
+	wantPath         string
+	wantModel        string
+	wantXAIGrokOAuth bool
 }
 
 type handlerRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -71,6 +72,7 @@ func TestHandlerRoutesAllProviderAndSourceCombinationsNonStream(t *testing.T) {
 		path          string
 		authorization string
 		apiKey        string
+		headers       http.Header
 		body          []byte
 	}
 	recorded := make(chan upstreamRequest, 32)
@@ -79,7 +81,7 @@ func TestHandlerRoutesAllProviderAndSourceCombinationsNonStream(t *testing.T) {
 		require.NoError(t, err)
 		recorded <- upstreamRequest{
 			path: r.URL.Path, authorization: r.Header.Get("Authorization"),
-			apiKey: r.Header.Get("x-api-key"), body: body,
+			apiKey: r.Header.Get("x-api-key"), headers: r.Header.Clone(), body: body,
 		}
 		if r.Header.Get("Accept") == "text/event-stream" {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -115,6 +117,9 @@ func TestHandlerRoutesAllProviderAndSourceCombinationsNonStream(t *testing.T) {
 				} else {
 					assert.NotEmpty(t, upstreamCall.apiKey)
 				}
+				if providerCase.wantXAIGrokOAuth {
+					assertXAIGrokOAuthUpstreamRequest(t, upstreamCall.headers, upstreamCall.body, providerCase.wantPath)
+				}
 			})
 		}
 	}
@@ -123,14 +128,15 @@ func TestHandlerRoutesAllProviderAndSourceCombinationsNonStream(t *testing.T) {
 func TestHandlerRoutesAllProviderAndSourceCombinationsStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	type upstreamRequest struct {
-		path string
-		body []byte
+		path    string
+		headers http.Header
+		body    []byte
 	}
 	recorded := make(chan upstreamRequest, 32)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		recorded <- upstreamRequest{path: r.URL.Path, body: body}
+		recorded <- upstreamRequest{path: r.URL.Path, headers: r.Header.Clone(), body: body}
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		_, _ = io.WriteString(w, successSSEForPath(r.URL.Path))
 	}))
@@ -153,6 +159,9 @@ func TestHandlerRoutesAllProviderAndSourceCombinationsStream(t *testing.T) {
 				assert.Equal(t, providerCase.wantPath, upstreamCall.path)
 				assert.Equal(t, providerCase.wantModel, bodyModel(t, upstreamCall.body))
 				assert.True(t, bodyStream(t, upstreamCall.body))
+				if providerCase.wantXAIGrokOAuth {
+					assertXAIGrokOAuthUpstreamRequest(t, upstreamCall.headers, upstreamCall.body, providerCase.wantPath)
+				}
 			})
 		}
 	}
@@ -166,6 +175,9 @@ func handlerProviderCases(baseURL string) []handlerProviderCase {
 		{name: "openai codex oauth", credential: oauthCred("openai", baseURL), qualifiedModel: "openai/gpt-5", wantPath: "/codex/responses", wantModel: "gpt-5"},
 		{name: "xai", credential: apiKeyCred("xai", baseURL), qualifiedModel: "xai/grok-4.5", wantPath: "/v1/responses", wantModel: "grok-4.5"},
 		{name: "xai forced chat", credential: apiKeyCred("xai", baseURL), qualifiedModel: "xai-chat/grok-4.5", wantPath: "/v1/chat/completions", wantModel: "grok-4.5"},
+		{name: "xai grok oauth responses", credential: oauthCred("xai", baseURL), qualifiedModel: "xai-responses/grok-4.5", wantPath: "/responses", wantModel: "grok-4.5", wantXAIGrokOAuth: true},
+		{name: "xai grok oauth chat", credential: oauthCred("xai", baseURL), qualifiedModel: "xai-chat/grok-4.5", wantPath: "/chat/completions", wantModel: "grok-4.5", wantXAIGrokOAuth: true},
+		{name: "xai grok oauth messages", credential: oauthCred("xai", baseURL), qualifiedModel: "xai-messages/grok-4.5", wantPath: "/messages", wantModel: "grok-4.5", wantXAIGrokOAuth: true},
 		{name: "openai forced chat", credential: apiKeyCred("openai", baseURL), qualifiedModel: "openai-chat/gpt-5", wantPath: "/v1/chat/completions", wantModel: "gpt-5"},
 	}
 }
@@ -196,9 +208,9 @@ func requestBody(format model.Format, modelName string, stream bool) []byte {
 
 func successBodyForPath(path string) []byte {
 	switch path {
-	case "/v1/messages":
+	case "/v1/messages", "/messages":
 		return []byte(`{"id":"msg_up","type":"message","role":"assistant","content":[{"type":"text","text":"hello"}],"model":"upstream","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
-	case "/v1/chat/completions":
+	case "/v1/chat/completions", "/chat/completions":
 		return []byte(`{"id":"chat_up","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 	default:
 		return []byte(`{"id":"resp_up","object":"response","model":"upstream","status":"completed","output":[{"id":"item_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
@@ -207,20 +219,51 @@ func successBodyForPath(path string) []byte {
 
 func successSSEForPath(path string) string {
 	switch path {
-	case "/v1/messages":
+	case "/v1/messages", "/messages":
 		return "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_up\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"upstream\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n" +
 			"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
 			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n" +
 			"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
 			"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n" +
 			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	case "/v1/chat/completions":
+	case "/v1/chat/completions", "/chat/completions":
 		return "data: {\"id\":\"chat_up\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
 			"data: [DONE]\n\n"
 	default:
 		return "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_up\",\"object\":\"response\",\"model\":\"upstream\",\"status\":\"in_progress\"}}\n\n" +
 			"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"item_1\",\"delta\":\"hello\"}\n\n" +
 			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_up\",\"object\":\"response\",\"model\":\"upstream\",\"status\":\"completed\",\"output\":[{\"id\":\"item_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"
+	}
+}
+
+func assertXAIGrokOAuthUpstreamRequest(t *testing.T, headers http.Header, body []byte, path string) {
+	t.Helper()
+	assert.Equal(t, "Bearer test-access-token", headers.Get("Authorization"))
+	assert.Equal(t, upstream.XAI_GROK_TOKEN_AUTH_VALUE, headers.Get(upstream.XAI_GROK_TOKEN_AUTH_HEADER))
+	assert.Equal(t, upstream.XAI_GROK_AUTHENTICATE_RESPONSE_VALUE, headers.Get(upstream.XAI_GROK_AUTHENTICATE_RESPONSE_HEADER))
+	assert.Equal(t, upstream.DEFAULT_XAI_GROK_CLIENT_VERSION, headers.Get("x-grok-client-version"))
+	assert.Equal(t, upstream.DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, headers.Get("x-grok-client-identifier"))
+	assert.Equal(t, upstream.DEFAULT_XAI_GROK_CLIENT_MODE, headers.Get("x-grok-client-mode"))
+	assert.Equal(t, "grok-4.5", headers.Get("x-grok-model-override"))
+	assert.NotEmpty(t, headers.Get("x-grok-req-id"))
+	assert.NotEmpty(t, headers.Get("x-grok-conv-id"))
+	assert.NotEmpty(t, headers.Get("x-grok-session-id"))
+	assert.NotEmpty(t, headers.Get("x-grok-agent-id"))
+
+	var value map[string]any
+	require.NoError(t, json.Unmarshal(body, &value))
+	switch path {
+	case "/responses":
+		assert.Equal(t, false, value["store"])
+		assert.Contains(t, value["include"], upstream.XAI_GROK_ENCRYPTED_REASONING)
+	case "/chat/completions":
+		if value["stream"] == true {
+			assert.Equal(t, true, value["stream_options"].(map[string]any)["include_usage"])
+		}
+	case "/messages":
+		maxTokens, ok := value["max_tokens"].(float64)
+		require.True(t, ok)
+		assert.Positive(t, maxTokens)
 	}
 }
 
@@ -459,6 +502,40 @@ func TestHandlerPreservesUpstreamRateLimitMetadata(t *testing.T) {
 	assert.Equal(t, "7", response.Header().Get("Retry-After"))
 	assert.Equal(t, "upstream-request", response.Header().Get("x-request-id"))
 	assert.Contains(t, response.Body.String(), "slow down")
+}
+
+func TestHandlerPreservesXAIGrokOAuthResponseMetadataOnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Retry-After", "7")
+		w.Header().Set("x-request-id", "grok-upstream-request")
+		w.Header().Set("x-grok-context-window", "131072")
+		w.Header().Set("x-grok-max-completion-tokens", "32768")
+		w.Header().Set("x-models-etag", `"models-v1"`)
+		w.Header().Set("x-should-retry", "true")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"message":"slow down","code":"rate_limit"}}`)
+	}))
+	defer server.Close()
+
+	handler := newHandlerForCredential(t, oauthCred("xai", server.URL), server.Client())
+	router := gin.New()
+	router.POST("/model", handler.Handle(model.FORMAT_OPENAI_RESPONSES))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost,
+		"/model",
+		bytes.NewReader(requestBody(model.FORMAT_OPENAI_RESPONSES, "xai-responses/grok-4.5", false)),
+	))
+
+	assert.Equal(t, http.StatusTooManyRequests, response.Code)
+	assert.Equal(t, "application/json", response.Header().Get("Content-Type"))
+	assert.Equal(t, "7", response.Header().Get("Retry-After"))
+	assert.Equal(t, "grok-upstream-request", response.Header().Get("x-request-id"))
+	assert.Equal(t, "131072", response.Header().Get("x-grok-context-window"))
+	assert.Equal(t, "32768", response.Header().Get("x-grok-max-completion-tokens"))
+	assert.Equal(t, `"models-v1"`, response.Header().Get("x-models-etag"))
+	assert.Equal(t, "true", response.Header().Get("x-should-retry"))
 }
 
 func TestHandlerEmitsTerminalErrorWhenUpstreamStreamEndsEarly(t *testing.T) {

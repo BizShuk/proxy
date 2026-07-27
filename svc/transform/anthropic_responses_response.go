@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/model/anthropic"
@@ -83,9 +84,19 @@ func ResponsesToAnthropicResponse(ctx context.Context, envelope model.ResponseEn
 	for _, item := range source.Output {
 		switch item.Type {
 		case "reasoning":
+			parts := make([]string, 0, len(item.Summary))
 			for _, summary := range item.Summary {
-				content = append(content, anthropic.Content{Type: "thinking", Thinking: summary.Text})
+				parts = append(parts, summary.Text)
 			}
+			signature, err := encodeResponsesReasoningSignature(responsesReasoningSignature{
+				ID: item.ID, EncryptedContent: item.EncryptedContent,
+			})
+			if err != nil {
+				return model.TransformResult{}, protocolFailure(err)
+			}
+			content = append(content, anthropic.Content{
+				Type: "thinking", Thinking: strings.Join(parts, "\n"), Signature: signature,
+			})
 		case "message":
 			for _, part := range item.Content {
 				if part.Type != "output_text" {

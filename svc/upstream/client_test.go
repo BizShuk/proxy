@@ -315,6 +315,100 @@ func TestClientDoAppliesProviderSpecificHeaders(t *testing.T) {
 	}
 }
 
+func TestClientDoAppliesXAIGrokOAuthProtocol(t *testing.T) {
+	tests := []struct {
+		name       string
+		credential *authmodel.Credential
+		headers    http.Header
+		assert     func(*testing.T, http.Header)
+	}{
+		{
+			name: "preserves caller tracking metadata and owns auth identity",
+			credential: &authmodel.Credential{
+				Provider: "xai", Kind: authmodel.KIND_OAUTH, AccessToken: "xai-oauth-token",
+				AccountID: "credential-user-123",
+			},
+			headers: http.Header{
+				"x-request-id":             {"request-123"},
+				"x-grok-req-id":            {"grok-request-123"},
+				"x-grok-conv-id":           {"conversation-123"},
+				"x-grok-session-id":        {"session-123"},
+				"x-grok-agent-id":          {"agent-123"},
+				"x-grok-turn-idx":          {"7"},
+				"x-grok-deployment-id":     {"deployment-123"},
+				"x-grok-model-override":    {"spoofed-model"},
+				"x-grok-user-id":           {"spoofed-user"},
+				"X-XAI-Token-Auth":         {"spoofed-token-mode"},
+				"x-authenticateresponse":   {"spoofed-auth-response"},
+				"x-grok-client-version":    {"0.0.0"},
+				"x-grok-client-identifier": {"spoofed-client"},
+				"x-grok-client-mode":       {"interactive"},
+			},
+			assert: func(t *testing.T, header http.Header) {
+				assert.Equal(t, "grok-request-123", header.Get("x-grok-req-id"))
+				assert.Equal(t, "conversation-123", header.Get("x-grok-conv-id"))
+				assert.Equal(t, "session-123", header.Get("x-grok-session-id"))
+				assert.Equal(t, "agent-123", header.Get("x-grok-agent-id"))
+				assert.Equal(t, "7", header.Get("x-grok-turn-idx"))
+				assert.Equal(t, "deployment-123", header.Get("x-grok-deployment-id"))
+				assert.Equal(t, "credential-user-123", header.Get("x-grok-user-id"))
+			},
+		},
+		{
+			name:       "derives missing tracking metadata from proxy request",
+			credential: &authmodel.Credential{Provider: "xai", Kind: authmodel.KIND_OAUTH, AccessToken: "xai-oauth-token"},
+			headers:    http.Header{"x-request-id": {"request-fallback"}},
+			assert: func(t *testing.T, header http.Header) {
+				assert.Equal(t, "request-fallback", header.Get("x-grok-req-id"))
+				assert.Equal(t, "request-fallback", header.Get("x-grok-conv-id"))
+				assert.Equal(t, "request-fallback", header.Get("x-grok-session-id"))
+				assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, header.Get("x-grok-agent-id"))
+				assert.Empty(t, header.Get("x-grok-turn-idx"))
+				assert.Empty(t, header.Get("x-grok-deployment-id"))
+				assert.Empty(t, header.Get("x-grok-user-id"))
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/v1/responses", r.URL.Path)
+				assert.Equal(t, "Bearer xai-oauth-token", r.Header.Get("Authorization"))
+				assert.Equal(t, XAI_GROK_TOKEN_AUTH_VALUE, r.Header.Get(XAI_GROK_TOKEN_AUTH_HEADER))
+				assert.Equal(t, XAI_GROK_AUTHENTICATE_RESPONSE_VALUE, r.Header.Get(XAI_GROK_AUTHENTICATE_RESPONSE_HEADER))
+				assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_MODE, r.Header.Get("x-grok-client-mode"))
+				assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_VERSION, r.Header.Get("x-grok-client-version"))
+				assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, r.Header.Get("x-grok-client-identifier"))
+				assert.Equal(t, "grok-4.5", r.Header.Get("x-grok-model-override"))
+				assert.Equal(t, expectedXAIGrokUserAgent(), r.Header.Get("User-Agent"))
+				tc.assert(t, r.Header)
+
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("x-grok-context-window", "131072")
+				w.Header().Set("x-grok-max-completion-tokens", "32768")
+				w.Header().Set("x-models-etag", `"models-v1"`)
+				w.Header().Set("x-should-retry", "false")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer server.Close()
+
+			profile := defaultProfile(t, "xai-grok-oauth")
+			profile.BaseURL = server.URL + "/v1"
+			client, err := NewClient(server.Client(), timeoutConfig())
+			require.NoError(t, err)
+			response, err := client.Do(context.Background(), profile, tc.credential, model.RequestEnvelope{
+				TargetFormat: model.FORMAT_OPENAI_RESPONSES,
+				Model:        "grok-4.5",
+				Headers:      tc.headers,
+				Body:         []byte(`{"model":"grok-4.5","input":"hi"}`),
+			})
+			require.NoError(t, err)
+			require.NoError(t, response.Body.Close())
+		})
+	}
+}
+
 func TestClientDoOmitsEmptyCodexAccountID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Empty(t, r.Header.Get("ChatGPT-Account-ID"))
@@ -547,6 +641,21 @@ func expectedCodexUserAgent() string {
 		architecture = "arm64"
 	}
 	return fmt.Sprintf("%s/%s (%s; %s)", DEFAULT_CODEX_ORIGINATOR, DEFAULT_CODEX_VERSION, platform, architecture)
+}
+
+func expectedXAIGrokUserAgent() string {
+	platform := "linux"
+	switch runtime.GOOS {
+	case "darwin":
+		platform = "macos"
+	case "windows":
+		platform = "windows"
+	}
+	architecture := "x86_64"
+	if runtime.GOARCH == "arm64" {
+		architecture = "arm64"
+	}
+	return fmt.Sprintf("%s/%s (%s; %s)", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, DEFAULT_XAI_GROK_CLIENT_VERSION, platform, architecture)
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

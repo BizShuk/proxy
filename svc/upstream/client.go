@@ -131,6 +131,7 @@ func (c *Client) do(
 	}
 	forwardAllowlistedHeaders(profile, envelope.Headers, request.Header)
 	applyProviderHeaders(profile, cred, request.Header)
+	applyXAIGrokOAuthHeaders(profile, cred, envelope, request.Header)
 
 	response, err := c.httpClient.Do(request)
 	if err != nil {
@@ -231,6 +232,56 @@ func applyProviderHeaders(profile Profile, cred *authmodel.Credential, header ht
 	}
 }
 
+func applyXAIGrokOAuthHeaders(profile Profile, cred *authmodel.Credential, envelope model.RequestEnvelope, header http.Header) {
+	if profile.ID != XAI_GROK_OAUTH_PROFILE_ID {
+		return
+	}
+
+	header.Set(XAI_GROK_TOKEN_AUTH_HEADER, XAI_GROK_TOKEN_AUTH_VALUE)
+	header.Set(XAI_GROK_AUTHENTICATE_RESPONSE_HEADER, XAI_GROK_AUTHENTICATE_RESPONSE_VALUE)
+	header.Set("x-grok-client-version", DEFAULT_XAI_GROK_CLIENT_VERSION)
+	header.Set("x-grok-client-identifier", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER)
+	header.Set("x-grok-client-mode", DEFAULT_XAI_GROK_CLIENT_MODE)
+	header.Set("User-Agent", xaiGrokUserAgent())
+	header.Set("x-grok-model-override", strings.TrimSpace(envelope.Model))
+
+	requestID := firstNonBlankHeader(header, "x-grok-req-id", "x-request-id")
+	if requestID != "" {
+		header.Set("x-grok-req-id", requestID)
+	}
+	conversationID := firstNonBlankHeader(header, "x-grok-conv-id")
+	if conversationID == "" {
+		conversationID = requestID
+	}
+	if conversationID != "" {
+		header.Set("x-grok-conv-id", conversationID)
+	}
+	sessionID := firstNonBlankHeader(header, "x-grok-session-id")
+	if sessionID == "" {
+		sessionID = conversationID
+	}
+	if sessionID != "" {
+		header.Set("x-grok-session-id", sessionID)
+	}
+	if strings.TrimSpace(header.Get("x-grok-agent-id")) == "" {
+		header.Set("x-grok-agent-id", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER)
+	}
+
+	header.Del("x-grok-user-id")
+	if strings.TrimSpace(cred.AccountID) != "" {
+		header.Set("x-grok-user-id", strings.TrimSpace(cred.AccountID))
+	}
+}
+
+func firstNonBlankHeader(header http.Header, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func ensureCommaSeparatedHeader(header http.Header, name, required string) {
 	values := header.Values(name)
 	items := make([]string, 0, len(values)+1)
@@ -257,6 +308,16 @@ func ensureCommaSeparatedHeader(header http.Header, name, required string) {
 }
 
 func codexUserAgent() string {
+	platform, architecture := userAgentPlatform()
+	return fmt.Sprintf("%s/%s (%s; %s)", DEFAULT_CODEX_ORIGINATOR, DEFAULT_CODEX_VERSION, platform, architecture)
+}
+
+func xaiGrokUserAgent() string {
+	platform, architecture := userAgentPlatform()
+	return fmt.Sprintf("%s/%s (%s; %s)", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, DEFAULT_XAI_GROK_CLIENT_VERSION, platform, architecture)
+}
+
+func userAgentPlatform() (string, string) {
 	platform := "linux"
 	switch runtime.GOOS {
 	case "darwin":
@@ -268,7 +329,7 @@ func codexUserAgent() string {
 	if runtime.GOARCH == "arm64" {
 		architecture = "arm64"
 	}
-	return fmt.Sprintf("%s/%s (%s; %s)", DEFAULT_CODEX_ORIGINATOR, DEFAULT_CODEX_VERSION, platform, architecture)
+	return platform, architecture
 }
 
 func transportProxyError(err error) error {

@@ -2,7 +2,7 @@
 
 `proxy` 是一個通用的 LLM API 轉譯代理伺服器。它在客戶端 CLI (例如 Claude Code、Codex CLI) 與上游 LLM 提供者 (Anthropic、OpenAI、xAI、Google Gemini、MiniMax、Codex OAuth、Antigravity、Ollama) 之間居中：接收一種協定格式 (Anthropic Messages / OpenAI Chat Completions / OpenAI Responses)、依模型名稱路由到對應上游、把請求翻譯成上游原生協定 (含必要的 header/auth 規範化)、回程再翻譯回客戶端期待的格式 (含 SSE 串流)。
 
-它同時具備**多帳號 OAuth 登入狀態的代理轉發**能力：`auth login --provider X` 寫入的憑證由 `proxy` 在每次請求時讀取、過期自動換發，並依 credentials 自動選擇 api-key 或 OAuth 模式。
+它同時具備**多帳號 OAuth 登入狀態的代理轉發**能力：`auth login --provider X` 寫入的憑證由 `proxy` 在每次請求時讀取、過期自動換發，並依 credentials 自動選擇 api-key 或 OAuth 模式。xAI API key 維持走公開 `api.x.ai`；xAI OAuth 則依 [`xai-org/grok-build`](https://github.com/xai-org/grok-build/tree/b41c75a578f98bddbd326ab02cd53618451d97ee) inference contract 走 `cli-chat-proxy.grok.com`，支援 Responses、Chat Completions、Messages 三種上游協定。
 
 ---
 
@@ -33,7 +33,7 @@
 `領域流程 (Domain Flow):`
 
 1. `Router.Resolve(format, modelName)` 檢查模型字串
-2. 若帶 `/` 形式 (`provider/model` 或 `provider-chat/model`)，對應到 `qualifier` 並剝離前綴為 `routed_model`；`*-chat` 結尾強制 target = `FORMAT_OPENAI_CHAT`
+2. 若帶 `/` 形式 (`provider/model` 或 `provider-<format>/model`)，對應到 `qualifier` 並剝離前綴為 `routed_model`；`*-responses`、`*-chat`、`*-messages` 分別強制 target = `FORMAT_OPENAI_RESPONSES`、`FORMAT_OPENAI_CHAT`、`FORMAT_ANTHROPIC_MESSAGES`
 3. 否則依序比對 `ExactModels`、再比對 `Prefixes`，必須恰好命中一家，否則視為 `unknown_model`
 4. 結果傳給 `Catalog.ResolveProfile` 解析成具體 `Profile` (含 endpoint、auth scheme、header allowlist、normalizer)
 
@@ -51,7 +51,7 @@
 
 1. `CredentialResolver.Resolve(ctx, family)` 委託 `auth/svc.Resolver`：優先從 `cfg.AuthDir` (`utils.NewFileStore`) 讀取，否則走 env fallback (`svc.EnvLookup`)
 2. OAuth 模式下 `provider.For(cred).Refresh()` 在過期或即將過期時換發新 token 並 `Save` 回磁碟
-3. dispatcher 端：`BuildProvider(cred)` 依 `cred.Kind` 分流到 `buildAPIKeyProvider` 或 `buildOAuthProvider`，把通用 `authmodel.Credential` 映射為該 provider 的 `WithAPIKey` 或 `NewWithOAuth` 構造參數
+3. dispatcher 端：`BuildProvider(cred)` 依 `cred.Kind` 分流到 `buildAPIKeyProvider` 或 `buildOAuthProvider`，把通用 `authmodel.Credential` 映射為該 provider 的 `WithAPIKey` 或 `NewWithOAuth` 構造參數；auth storage 的 `xai` family 會映射為 Agents SDK 的 `grok` provider
 4. 結果是一個 `core.Provider` 實例，登錄到 `Dispatcher` 供後續請求使用
 
 `核心實體 (Key Entities):` `authmodel.Credential`, `authmodel.Kind` (api_key / oauth), `CredentialResolver`, `core.Provider`, `auth/svc.Resolver`
@@ -66,9 +66,9 @@
 
 `領域流程 (Domain Flow):`
 
-1. 啟動時 `DefaultCatalog()` 載入 6 個 `Profile` (anthropic / minimax / openai-api / openai-codex-oauth / xai / google)，每個含 endpoint map、auth scheme、header allowlist、`AdvertisedModels`、選填的 `NormalizeRequest`
-2. `Client.do(...)` 依 profile + credential 構造 HTTP request、套用 allowlist 過濾 header、注入 `x-api-key` / `Authorization`、必要時加 `anthropic-version` / codex 的 `originator`、`version`、`User-Agent`、`ChatGPT-Account-ID`
-3. `Profile.NormalizeRequest(envelope)` 在轉譯完成後執行：例如 `normalizeCodexRequest` 把 `instructions` 從 system/developer 訊息裡 lift 出來、刪除 `max_output_tokens`、強制 `stream: true`；`normalizeXAIRequest` 拒絕非 function 類型 tool
+1. 啟動時 `DefaultCatalog()` 載入 7 個 `Profile` (anthropic / minimax / openai-api / openai-codex-oauth / xai / xai-grok-oauth / google)，每個含 endpoint map、auth scheme、header allowlist、`AdvertisedModels`、選填的 `NormalizeRequest`
+2. `Client.do(...)` 依 profile + credential 構造 HTTP request、套用 allowlist 過濾 header、注入 `x-api-key` / `Authorization`、必要時加 `anthropic-version` / Codex headers / Grok OAuth headers
+3. `Profile.NormalizeRequest(envelope)` 在轉譯完成後執行：例如 `normalizeCodexRequest` 把 `instructions` 從 system/developer 訊息裡 lift 出來、刪除 `max_output_tokens`、強制 `stream: true`；API-key `normalizeXAIRequest` 拒絕非 function 類型 tool；OAuth `normalizeXAIGrokOAuthRequest` 則保留 `x_search` 等 xAI raw tools，並依協定補齊 Grok defaults
 4. `Dispatcher.Lookup(family)` 提供 `/v1/models` 端點的 `AdvertisedModels` 來源
 
 `核心實體 (Key Entities):` `Profile`, `Catalog`, `Dispatcher`, `NormalizeRequest`, `NormalizedRequest`
@@ -194,8 +194,25 @@ grok-2 / grok-2-mini                     → xai
 gemini-1.5-pro                           → google
 MiniMax-Text-01 / minimax-M2             → minimax
 openai/gpt-4o                            → openai (強制走 openai family)
-anthropic-chat/claude-3-5-sonnet-20240620 → anthropic (強制走 chat format)
+xai-responses/grok-4.5                    → xai (強制走 Responses)
+xai-chat/grok-4.5                         → xai (強制走 Chat Completions)
+xai-messages/grok-4.5                     → xai (強制走 Messages)
 ```
+
+`xAI Grok OAuth inference contract`:
+
+| Credential | Profile | Base URL | 支援的上游協定 |
+| ---------- | ------- | -------- | -------------- |
+| `xai` API key | `xai` | `https://api.x.ai` | Responses、Chat Completions |
+| `xai` OAuth | `xai-grok-oauth` | `https://cli-chat-proxy.grok.com/v1` | Responses、Chat Completions、Messages |
+
+- OAuth Responses endpoint：`/responses`；缺少 `store` 時補 `false`，並確保 `include` 含 `reasoning.encrypted_content`。
+- Anthropic Messages 與 Responses 之間的 reasoning history 保留原始順序與 `id` / `summary` / `encrypted_content`；opaque metadata 透過版本化 `thinking.signature`（串流為 `signature_delta`）交給 Claude Code 往返，避免 tool loop 第二輪遺失 Grok reasoning state。
+- OAuth Chat endpoint：`/chat/completions`；串流時補 `stream_options.include_usage=true`。
+- OAuth Messages endpoint：`/messages`；`max_tokens` 缺少或為 `0` 時補 `128000`。
+- OAuth request 固定注入 `X-XAI-Token-Auth: xai-grok-cli`、`x-authenticateresponse: authenticate-response`、`x-grok-client-*` 與 request metadata；`x-grok-model-override` 由實際 routed model 產生，不能由 downstream spoof。
+- OAuth response 的 `x-grok-context-window`、`x-grok-max-completion-tokens`、`x-models-etag`、`x-should-retry` 會在成功與錯誤回應中安全轉送。
+- xAI 登入、token refresh 與持久化仍由 `github.com/bizshuk/auth` 的 `xai_oauth` device flow 負責；本專案實作的是三種 inference wire protocol，不代理 Grok Conversations / Workspaces 產品 API。
 
 `HTTP client 設定範例 (Client Config):`
 

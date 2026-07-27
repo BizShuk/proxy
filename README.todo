@@ -1,3 +1,7 @@
 # TODO
 
 - [ ] claude /fork can't read the AGENTSDK_PROXY_API_KEY
+
+## Archive
+
+- [x] 2026-07-27 — 完成 xAI Grok OAuth 的 Responses、Chat Completions、Messages inference protocol

@@ -12,7 +12,7 @@ func TestRouterResolve(t *testing.T) {
 	router, err := NewRouter([]Profile{
 		{ID: "anthropic", Qualifiers: []string{"anthropic"}, Prefixes: []string{"claude-"}},
 		{ID: "openai", Qualifiers: []string{"openai", "openai-chat"}, Prefixes: []string{"gpt-", "o1-", "o3-"}},
-		{ID: "xai", Qualifiers: []string{"xai", "xai-chat"}, Prefixes: []string{"grok-"}},
+		{ID: "xai", Qualifiers: []string{"xai", "xai-responses", "xai-chat", "xai-messages"}, Prefixes: []string{"grok-"}},
 		{ID: "minimax", Qualifiers: []string{"minimax"}, ExactModels: []string{"MiniMax-Text-01"}, Prefixes: []string{"minimax-"}},
 	})
 	require.NoError(t, err)
@@ -25,7 +25,9 @@ func TestRouterResolve(t *testing.T) {
 		wantErr      bool
 	}{
 		{model: "xai/grok-4.5", wantProvider: "xai", wantModel: "grok-4.5"},
+		{model: "xai-responses/grok-4.5", wantProvider: "xai", wantModel: "grok-4.5", wantForced: formatPtr(model.FORMAT_OPENAI_RESPONSES)},
 		{model: "xai-chat/grok-4.5", wantProvider: "xai", wantModel: "grok-4.5", wantForced: formatPtr(model.FORMAT_OPENAI_CHAT)},
+		{model: "xai-messages/grok-4.5", wantProvider: "xai", wantModel: "grok-4.5", wantForced: formatPtr(model.FORMAT_ANTHROPIC_MESSAGES)},
 		{model: "gpt-5", wantProvider: "openai", wantModel: "gpt-5"},
 		{model: "openai-chat/gpt-5", wantProvider: "openai", wantModel: "gpt-5", wantForced: formatPtr(model.FORMAT_OPENAI_CHAT)},
 		{model: "claude-3-5-sonnet-latest", wantProvider: "anthropic", wantModel: "claude-3-5-sonnet-latest"},

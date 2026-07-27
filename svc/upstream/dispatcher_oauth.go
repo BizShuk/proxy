@@ -12,7 +12,7 @@
 //	anthropic    anthropic.New(WithAPIKey)     anthropic.NewWithOAuth
 //	codex        codex.New(WithAPIKey)         codex.NewWithOAuth
 //	antigravity  antigravity.New(WithAPIKey)   antigravity.NewWithOAuth
-//	grok         grok.New(WithAPIKey)          grok.NewWithOAuth
+//	xai          grok.New(WithAPIKey)          grok.NewWithOAuth
 //	ollama       ollama.New(WithAPIKey)        (keyless only)
 //	minimax      minimax.New(WithAPIKey)       (api key only)
 //
@@ -73,7 +73,7 @@ func buildAPIKeyProvider(cred *authmodel.Credential) (core.Provider, error) {
 		return anthropic.New(anthropic.WithAPIKey(cred.APIKey))
 	case "codex":
 		return codex.New(codex.WithAPIKey(cred.APIKey))
-	case "grok":
+	case "xai", "grok":
 		return grok.New(grok.WithAPIKey(cred.APIKey))
 	case "antigravity":
 		return antigravity.New(antigravity.WithAPIKey(cred.APIKey))
@@ -117,7 +117,7 @@ func buildOAuthProvider(cred *authmodel.Credential) (core.Provider, error) {
 			ExpiresAt:    oauthCreds.ExpiresAt,
 			Email:        oauthCreds.Email,
 		})
-	case "grok":
+	case "xai", "grok":
 		return grok.NewWithOAuth(grok.OAuthCredentials{
 			AccessToken:  oauthCreds.AccessToken,
 			RefreshToken: oauthCreds.RefreshToken,
@@ -219,7 +219,7 @@ func NewDispatcherWithAuthAndEnv(resolver *svc.Resolver) (*Dispatcher, error) {
 }
 
 func familiesInDefaultOrder() []string {
-	return []string{"anthropic", "codex", "antigravity", "grok", "ollama", "minimax", "google"}
+	return []string{"anthropic", "codex", "antigravity", "xai", "ollama", "minimax", "google"}
 }
 
 func newDispatcherWithAuth(resolver *svc.Resolver, families []string) (*Dispatcher, error) {

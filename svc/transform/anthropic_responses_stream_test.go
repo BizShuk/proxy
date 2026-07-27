@@ -67,6 +67,66 @@ func TestResponsesToAnthropicStreamLifecycle(t *testing.T) {
 	assert.Equal(t, 4, messageDelta.Usage.OutputTokens)
 }
 
+func TestResponsesToAnthropicStreamPreservesReasoningMetadataInSignature(t *testing.T) {
+	stream, err := NewResponsesToAnthropicStream(task9ExchangeFor("grok-4.5-latest", "grok-4.5-latest"))
+	require.NoError(t, err)
+
+	output := task9PushAll(t, stream, []model.SSEFrame{
+		{Event: "response.created", Data: []byte(`{
+			"type":"response.created",
+			"response":{"id":"resp_1","model":"grok-4.5-latest","status":"in_progress"}
+		}`)},
+		{Event: "response.output_item.added", Data: []byte(`{
+			"type":"response.output_item.added",
+			"item":{"id":"reasoning_1","type":"reasoning","summary":[],"status":"in_progress"}
+		}`)},
+		{Event: "response.reasoning_summary_text.delta", Data: []byte(`{
+			"type":"response.reasoning_summary_text.delta",
+			"item_id":"reasoning_1",
+			"delta":"I should inspect the workspace."
+		}`)},
+		{Event: "response.output_item.done", Data: []byte(`{
+			"type":"response.output_item.done",
+			"item":{
+				"id":"reasoning_1",
+				"type":"reasoning",
+				"summary":[{"type":"summary_text","text":"I should inspect the workspace."}],
+				"encrypted_content":"encrypted-reasoning",
+				"status":"completed"
+			}
+		}`)},
+		{Event: "response.completed", Data: []byte(`{
+			"type":"response.completed",
+			"response":{"id":"resp_1","model":"grok-4.5-latest","status":"completed"}
+		}`)},
+	})
+	require.NoError(t, task9CloseStream(t, stream, &output))
+
+	var signature string
+	for _, frame := range output {
+		if frame.Event != "content_block_delta" {
+			continue
+		}
+		var event struct {
+			Delta struct {
+				Type      string `json:"type"`
+				Signature string `json:"signature"`
+			} `json:"delta"`
+		}
+		task9DecodeEvent(t, frame, &event)
+		if event.Delta.Type == "signature_delta" {
+			signature = event.Delta.Signature
+			break
+		}
+	}
+	require.NotEmpty(t, signature)
+	metadata, recognized, err := decodeResponsesReasoningSignature(signature)
+	require.NoError(t, err)
+	require.True(t, recognized)
+	assert.Equal(t, "reasoning_1", metadata.ID)
+	assert.Equal(t, "encrypted-reasoning", metadata.EncryptedContent)
+}
+
 func TestAnthropicToResponsesStreamLifecycle(t *testing.T) {
 	stream, err := NewAnthropicToResponsesStream(task9ExchangeFor("gpt-5", "claude-3"))
 	require.NoError(t, err)

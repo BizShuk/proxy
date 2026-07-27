@@ -172,6 +172,25 @@ func task5AnthropicInput(messages []anthropic.Message) ([]responses.InputItem, [
 		}
 		for _, block := range message.Content {
 			switch block.Type {
+			case "thinking":
+				flush()
+				metadata, recognized, err := decodeResponsesReasoningSignature(block.Signature)
+				if err != nil {
+					return nil, nil, task5InvalidRequest("decode Responses reasoning signature", err)
+				}
+				item := responses.InputItem{
+					ID: metadata.ID, Type: "reasoning", EncryptedContent: metadata.EncryptedContent,
+				}
+				if block.Thinking != "" {
+					item.Summary = responses.ContentList{{Type: "summary_text", Text: block.Thinking}}
+				}
+				items = append(items, item)
+				if block.Signature != "" && !recognized {
+					losses = append(losses, model.SemanticLoss{
+						Field:  "messages.content.thinking.signature",
+						Reason: "Responses input cannot preserve a non-Responses Anthropic thinking signature",
+					})
+				}
 			case "text":
 				contentType := "input_text"
 				if message.Role == "assistant" {

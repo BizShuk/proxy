@@ -46,6 +46,7 @@ type responsesToAnthropicBlock struct {
 	typeName  string
 	callID    string
 	name      string
+	text      string
 	arguments string
 	open      bool
 }
@@ -191,6 +192,25 @@ func (s *responsesToAnthropicStream) ensureMessageStart() ([]model.SSEFrame, err
 }
 
 func (s *responsesToAnthropicStream) pushReasoning(delta string) ([]model.SSEFrame, error) {
+	output, err := s.ensureThinkingBlock()
+	if err != nil {
+		return nil, err
+	}
+	if delta == "" {
+		return output, nil
+	}
+	s.thinking.text += delta
+	deltaFrame, err := makeStreamFrame("content_block_delta", map[string]any{
+		"type": "content_block_delta", "index": s.thinking.index,
+		"delta": map[string]any{"type": "thinking_delta", "thinking": delta},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append(output, deltaFrame), nil
+}
+
+func (s *responsesToAnthropicStream) ensureThinkingBlock() ([]model.SSEFrame, error) {
 	output, err := s.ensureMessageStart()
 	if err != nil {
 		return nil, err
@@ -208,14 +228,7 @@ func (s *responsesToAnthropicStream) pushReasoning(delta string) ([]model.SSEFra
 		}
 		output = append(output, start)
 	}
-	deltaFrame, err := makeStreamFrame("content_block_delta", map[string]any{
-		"type": "content_block_delta", "index": s.thinking.index,
-		"delta": map[string]any{"type": "thinking_delta", "thinking": delta},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return append(output, deltaFrame), nil
+	return output, nil
 }
 
 func (s *responsesToAnthropicStream) addOutputItem(item responses.OutputItem) ([]model.SSEFrame, error) {
@@ -325,6 +338,43 @@ func (s *responsesToAnthropicStream) finishArguments(itemID, callID, arguments s
 }
 
 func (s *responsesToAnthropicStream) finishOutputItem(item responses.OutputItem) ([]model.SSEFrame, error) {
+	if item.Type == "reasoning" {
+		var output []model.SSEFrame
+		var err error
+		if s.thinking == nil || s.thinking.text == "" {
+			parts := make([]string, 0, len(item.Summary))
+			for _, summary := range item.Summary {
+				parts = append(parts, summary.Text)
+			}
+			output, err = s.pushReasoning(strings.Join(parts, "\n"))
+		} else {
+			output, err = s.ensureThinkingBlock()
+		}
+		if err != nil {
+			return nil, err
+		}
+		signature, err := encodeResponsesReasoningSignature(responsesReasoningSignature{
+			ID: item.ID, EncryptedContent: item.EncryptedContent,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if signature != "" {
+			frame, frameErr := makeStreamFrame("content_block_delta", map[string]any{
+				"type": "content_block_delta", "index": s.thinking.index,
+				"delta": map[string]any{"type": "signature_delta", "signature": signature},
+			})
+			if frameErr != nil {
+				return nil, frameErr
+			}
+			output = append(output, frame)
+		}
+		closed, err := s.closeBlock(s.thinking)
+		if err != nil {
+			return nil, err
+		}
+		return append(output, closed...), nil
+	}
 	if item.Type == "function_call" {
 		block, err := s.resolveTool(item.ID, item.CallID)
 		if err != nil {

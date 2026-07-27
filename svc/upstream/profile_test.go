@@ -56,6 +56,15 @@ func TestDefaultCatalogCapabilities(t *testing.T) {
 				model.FORMAT_OPENAI_CHAT:      "/v1/chat/completions",
 			},
 		},
+		{
+			id: "xai-grok-oauth", preferred: model.FORMAT_OPENAI_RESPONSES,
+			baseURL: "https://cli-chat-proxy.grok.com/v1",
+			endpoints: map[model.Format]string{
+				model.FORMAT_OPENAI_RESPONSES:   "/responses",
+				model.FORMAT_OPENAI_CHAT:        "/chat/completions",
+				model.FORMAT_ANTHROPIC_MESSAGES: "/messages",
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.id, func(t *testing.T) {
@@ -89,6 +98,10 @@ func TestCatalogResolveProfile(t *testing.T) {
 		{name: "OpenAI OAuth rejects Chat", family: "openai", kind: authmodel.KIND_OAUTH, forced: profileFormatPtr(model.FORMAT_OPENAI_CHAT), wantErrorKind: model.ERROR_UNSUPPORTED_FEATURE},
 		{name: "xAI defaults Responses", family: "xai", kind: authmodel.KIND_API_KEY, wantID: "xai", wantTarget: model.FORMAT_OPENAI_RESPONSES},
 		{name: "xAI forced Chat", family: "xai", kind: authmodel.KIND_API_KEY, forced: profileFormatPtr(model.FORMAT_OPENAI_CHAT), wantID: "xai", wantTarget: model.FORMAT_OPENAI_CHAT},
+		{name: "xAI API key rejects Messages", family: "xai", kind: authmodel.KIND_API_KEY, forced: profileFormatPtr(model.FORMAT_ANTHROPIC_MESSAGES), wantErrorKind: model.ERROR_UNSUPPORTED_FEATURE},
+		{name: "xAI OAuth defaults Responses", family: "xai", kind: authmodel.KIND_OAUTH, wantID: "xai-grok-oauth", wantTarget: model.FORMAT_OPENAI_RESPONSES},
+		{name: "xAI OAuth supports Chat", family: "xai", kind: authmodel.KIND_OAUTH, forced: profileFormatPtr(model.FORMAT_OPENAI_CHAT), wantID: "xai-grok-oauth", wantTarget: model.FORMAT_OPENAI_CHAT},
+		{name: "xAI OAuth supports Messages", family: "xai", kind: authmodel.KIND_OAUTH, forced: profileFormatPtr(model.FORMAT_ANTHROPIC_MESSAGES), wantID: "xai-grok-oauth", wantTarget: model.FORMAT_ANTHROPIC_MESSAGES},
 		{name: "unknown family", family: "unknown", kind: authmodel.KIND_API_KEY, wantErrorKind: model.ERROR_UNKNOWN_MODEL},
 	}
 	for _, tc := range tests {
@@ -289,6 +302,102 @@ func TestXAINormalizerRejectsUnsupportedTools(t *testing.T) {
 	assert.Equal(t, model.ERROR_UNSUPPORTED_FEATURE, proxyErr.Kind)
 }
 
+func TestXAIGrokOAuthResponsesNormalizer(t *testing.T) {
+	catalog, err := DefaultCatalog()
+	require.NoError(t, err)
+	profile, ok := catalog.Lookup("xai-grok-oauth")
+	require.True(t, ok)
+
+	tests := []struct {
+		name      string
+		body      string
+		wantStore bool
+	}{
+		{
+			name:      "defaults store and encrypted reasoning include",
+			body:      `{"model":"grok-4.5","input":"hi","tools":[{"type":"x_search","allowed_domains":["example.com"]}],"future_field":{"kept":true}}`,
+			wantStore: false,
+		},
+		{
+			name:      "preserves explicit store and deduplicates include",
+			body:      `{"model":"grok-4.5","input":"hi","store":true,"include":["reasoning.encrypted_content","file_search_call.results"]}`,
+			wantStore: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			normalized, err := profile.NormalizeRequest(model.RequestEnvelope{
+				TargetFormat: model.FORMAT_OPENAI_RESPONSES,
+				Body:         []byte(tc.body),
+			})
+			require.NoError(t, err)
+			assert.False(t, normalized.UpstreamStream)
+
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(normalized.Body, &got))
+			assert.Equal(t, tc.wantStore, got["store"])
+			include, ok := got["include"].([]any)
+			require.True(t, ok)
+			var encryptedReasoningCount int
+			for _, value := range include {
+				if value == "reasoning.encrypted_content" {
+					encryptedReasoningCount++
+				}
+			}
+			assert.Equal(t, 1, encryptedReasoningCount)
+			if _, exists := got["future_field"]; exists {
+				assert.Equal(t, map[string]any{"kept": true}, got["future_field"])
+			}
+			if tools, exists := got["tools"]; exists {
+				require.Len(t, tools, 1)
+				assert.Equal(t, "x_search", tools.([]any)[0].(map[string]any)["type"])
+			}
+		})
+	}
+}
+
+func TestXAIGrokOAuthChatNormalizerMergesStreamingOptions(t *testing.T) {
+	catalog, err := DefaultCatalog()
+	require.NoError(t, err)
+	profile, ok := catalog.Lookup("xai-grok-oauth")
+	require.True(t, ok)
+
+	normalized, err := profile.NormalizeRequest(model.RequestEnvelope{
+		TargetFormat: model.FORMAT_OPENAI_CHAT,
+		Stream:       true,
+		Body:         []byte(`{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}],"stream_options":{"future":true},"future_field":"kept"}`),
+	})
+	require.NoError(t, err)
+	assert.True(t, normalized.UpstreamStream)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(normalized.Body, &got))
+	assert.Equal(t, true, got["stream"])
+	assert.Equal(t, "kept", got["future_field"])
+	assert.Equal(t, map[string]any{"future": true, "include_usage": true}, got["stream_options"])
+}
+
+func TestXAIGrokOAuthMessagesNormalizerDefaultsAndStreams(t *testing.T) {
+	catalog, err := DefaultCatalog()
+	require.NoError(t, err)
+	profile, ok := catalog.Lookup("xai-grok-oauth")
+	require.True(t, ok)
+
+	normalized, err := profile.NormalizeRequest(model.RequestEnvelope{
+		TargetFormat: model.FORMAT_ANTHROPIC_MESSAGES,
+		Stream:       true,
+		Body:         []byte(`{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}],"future_field":"kept"}`),
+	})
+	require.NoError(t, err)
+	assert.True(t, normalized.UpstreamStream)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(normalized.Body, &got))
+	assert.Equal(t, true, got["stream"])
+	assert.Equal(t, float64(128000), got["max_tokens"])
+	assert.Equal(t, "kept", got["future_field"])
+}
+
 func TestOrdinaryNormalizerPreservesBody(t *testing.T) {
 	catalog, err := DefaultCatalog()
 	require.NoError(t, err)
@@ -326,6 +435,47 @@ func TestAnthropicProfileHeaderMetadata(t *testing.T) {
 	assert.Equal(t, "/v1/messages/count_tokens", profile.CountTokensEndpoint)
 	assert.Equal(t, []string{"content-type", "retry-after", "x-request-id", "request-id", "cf-ray"}, profile.AllowedResponseHeaders)
 	assert.Equal(t, http.CanonicalHeaderKey("anthropic-version"), http.CanonicalHeaderKey("Anthropic-Version"))
+}
+
+func TestXAIGrokOAuthProfileHeaderMetadata(t *testing.T) {
+	catalog, err := DefaultCatalog()
+	require.NoError(t, err)
+	profile, ok := catalog.Lookup("xai-grok-oauth")
+	require.True(t, ok)
+
+	for _, header := range []string{
+		"x-request-id",
+		"x-grok-conv-id",
+		"x-grok-req-id",
+		"x-grok-session-id",
+		"x-grok-turn-idx",
+		"x-grok-agent-id",
+		"x-grok-deployment-id",
+	} {
+		assert.True(t, profile.AllowsRequestHeader(header), header)
+	}
+	for _, header := range []string{
+		"authorization",
+		"x-xai-token-auth",
+		"x-authenticateresponse",
+		"x-grok-client-version",
+		"x-grok-client-identifier",
+		"x-grok-client-mode",
+		"x-grok-model-override",
+		"x-grok-user-id",
+	} {
+		assert.False(t, profile.AllowsRequestHeader(header), header)
+	}
+	for _, header := range []string{
+		"content-type",
+		"retry-after",
+		"x-grok-context-window",
+		"x-grok-max-completion-tokens",
+		"x-models-etag",
+		"x-should-retry",
+	} {
+		assert.True(t, profile.AllowsResponseHeader(header), header)
+	}
 }
 
 func TestCatalogAdvertisedModelsAreDeterministicAndUnique(t *testing.T) {
