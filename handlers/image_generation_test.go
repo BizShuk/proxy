@@ -85,6 +85,43 @@ func TestHandleImageGenerationsOAuthRoundTrip(t *testing.T) {
 	assert.JSONEq(t, string(requestBody), string(upstreamRequest.body))
 }
 
+func TestHandleImageGenerationsOpenAIAPIKeyRoundTrip(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var gotPath string
+	var gotAuthorization string
+	var gotHeaders http.Header
+	imageAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuthorization = r.Header.Get("Authorization")
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"created":1720000000,"data":[{"b64_json":"aW1hZ2U="}]}`)
+	}))
+	defer imageAPI.Close()
+
+	credential := &authmodel.Credential{
+		Provider: "openai", Kind: authmodel.KIND_API_KEY, APIKey: "openai-api-key",
+	}
+	handler := newImageHandlerForCredential(t, credential, imageAPI.Client(), imageAPI.URL)
+	router := gin.New()
+	router.POST("/v1/images/generations", handler.HandleImageGenerations())
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/images/generations",
+		bytes.NewBufferString(`{"model":"gpt-image-2","prompt":"a space cat","response_format":"b64_json"}`),
+	)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Equal(t, "/v1/images/generations", gotPath)
+	assert.Equal(t, "Bearer openai-api-key", gotAuthorization)
+	assert.Empty(t, gotHeaders.Get("x-grok-client-version"))
+	assert.Empty(t, gotHeaders.Get("x-grok-client-identifier"))
+	assert.JSONEq(t, `{"created":1720000000,"data":[{"b64_json":"aW1hZ2U="}]}`, response.Body.String())
+}
+
 func TestHandleImageGenerationsRejectsInvalidRequestBeforeUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var upstreamCalls atomic.Int32
@@ -142,8 +179,8 @@ func newImageHandlerForCredential(
 	registry, err := transform.NewDefaultRegistry()
 	require.NoError(t, err)
 
-	imageProfiles := make([]upstream.Profile, 0, 2)
-	for _, profileID := range []string{"xai", upstream.XAI_GROK_OAUTH_PROFILE_ID} {
+	imageProfiles := make([]upstream.Profile, 0, 3)
+	for _, profileID := range []string{"openai-api", "xai", upstream.XAI_GROK_OAUTH_PROFILE_ID} {
 		profile, ok := defaultCatalog.Lookup(profileID)
 		require.True(t, ok)
 		profile.ImageGenerationBaseURL = imageBaseURL

@@ -2,7 +2,7 @@
 
 `proxy` 是一個通用的 LLM API 轉譯代理伺服器。它在客戶端 CLI (例如 Claude Code、Codex CLI) 與上游 LLM 提供者 (Anthropic、OpenAI、xAI、Google Gemini、MiniMax、Codex OAuth、Antigravity、Ollama) 之間居中：接收一種協定格式 (Anthropic Messages / OpenAI Chat Completions / OpenAI Responses)、依模型名稱路由到對應上游、把請求翻譯成上游原生協定 (含必要的 header/auth 規範化)、回程再翻譯回客戶端期待的格式 (含 SSE 串流)。
 
-它同時具備`多帳號 OAuth 登入狀態的代理轉發`能力：`auth login --provider X` 寫入的憑證由 `proxy` 在每次請求時讀取、過期自動換發，並依 credentials 自動選擇 api-key 或 OAuth 模式。xAI API key 的 inference 維持走公開 `api.x.ai`；xAI OAuth inference 則依 [`xai-org/grok-build`](https://github.com/xai-org/grok-build/tree/b41c75a578f98bddbd326ab02cd53618451d97ee) contract 走 `cli-chat-proxy.grok.com`，支援 Responses、Chat Completions、Messages 三種上游協定。Imagine 圖片生成是例外：API key 與 OAuth 都直接走 `api.x.ai/v1/images/generations`。
+它同時具備`多帳號 OAuth 登入狀態的代理轉發`能力：`auth login --provider X` 寫入的憑證由 `proxy` 在每次請求時讀取、過期自動換發，並依 credentials 自動選擇 api-key 或 OAuth 模式。xAI API key 的 inference 維持走公開 `api.x.ai`；xAI OAuth inference 則依 [`xai-org/grok-build`](https://github.com/xai-org/grok-build/tree/b41c75a578f98bddbd326ab02cd53618451d97ee) contract 走 `cli-chat-proxy.grok.com`，支援 Responses、Chat Completions、Messages 三種上游協定。圖片生成可依 model 選擇 OpenAI Image API 或 xAI Imagine。內附的 [`proxy-imagegen` plugin](plugins/proxy-imagegen) 會把這條圖片 API 暴露成 `MCP` 工具，供 Codex 與 Claude Code 直接產圖、顯示圖片並取得專案內的檔案路徑。
 
 ---
 
@@ -66,8 +66,8 @@
 
 `領域流程 (Domain Flow):`
 
-1. 啟動時 `DefaultCatalog()` 載入 7 個 `Profile` (anthropic / minimax / openai-api / openai-codex-oauth / xai / xai-grok-oauth / google)，每個含 endpoint map、auth scheme、header allowlist、`AdvertisedModels`、選填的 `NormalizeRequest`
-2. `Client.do(...)` 依 profile + credential 構造 HTTP request、套用 allowlist 過濾 header、注入 `x-api-key` / `Authorization`、必要時加 `anthropic-version` / Codex headers / Grok OAuth headers；`Client.GenerateImage(...)` 則固定把 xAI API key 或 OAuth bearer 送到公開 Imagine API
+1. 啟動時 `DefaultCatalog()` 載入 7 個 `Profile` (anthropic / minimax / openai-api / openai-codex-oauth / xai / xai-grok-oauth / google)，每個含 endpoint map、auth scheme、header allowlist、`AdvertisedModels`、選填的 `NormalizeRequest`；`openai-api`、`xai` 與 `xai-grok-oauth` 另宣告圖片 endpoint
+2. `Client.do(...)` 依 profile + credential 構造 HTTP request、套用 allowlist 過濾 header、注入 `x-api-key` / `Authorization`、必要時加 `anthropic-version` / Codex headers / Grok OAuth headers；`Client.GenerateImage(...)` 依 image profile 把 bearer 送到 OpenAI Image API 或 xAI Imagine
 3. `Profile.NormalizeRequest(envelope)` 在轉譯完成後執行：例如 `normalizeCodexRequest` 把 `instructions` 從 system/developer 訊息裡 lift 出來、刪除 `max_output_tokens`、強制 `stream: true`；API-key `normalizeXAIRequest` 拒絕非 function 類型 tool；OAuth `normalizeXAIGrokOAuthRequest` 則保留 `x_search` 等 xAI raw tools，並依協定補齊 Grok defaults
 4. `Dispatcher.Lookup(family)` 提供 `/v1/models` 端點的 `AdvertisedModels` 來源
 
@@ -133,19 +133,39 @@
 
 ---
 
+### 8. 圖片生成 MCP 接入 (Image Generation MCP Integration)
+
+以同一個 `stdio MCP` server 接入 Codex 與 Claude Code，不要求兩套 client 各自實作 xAI wire protocol。
+
+`領域流程 (Domain Flow):`
+
+1. Plugin 執行 `proxy image-mcp`，以環境變數或 Claude Code `userConfig` 取得 proxy `base_url`、`port`、`api_key` 與預設模型
+2. Agent 呼叫 `generate_image`，可傳 `prompt`、`model`、`n`、`aspect_ratio`、`resolution`
+3. MCP client 強制送 `response_format: "b64_json"` 至 proxy `POST /v1/images/generations`
+4. 回應經 Base64 解碼及實際 MIME 驗證後，寫入專案 `images/`，同時回傳 MCP image content 與相對路徑
+
+`核心實體 (Key Entities):` `mcpimage.Config`, `ProxyClient`, `Generator`, `generate_image`
+
+`相關處理器 (Related Handlers):` `mcpimage/config.go`, `mcpimage/client.go`, `mcpimage/tool.go`, `mcpimage/server.go`, `cmd/image_mcp.go`, `plugins/proxy-imagegen`
+
+---
+
 ## 領域關聯 (Domain Relationships)
 
 ```mermaid
 flowchart LR
-    HTTP["HTTP 表面 (#5)"] -->|route| Lifecycle["請求生命週期 (#6)"]
-    Lifecycle -->|Resolve model| Routing["模型路由 (#2)"]
-    Lifecycle -->|Resolve credential| Cred["憑證解析 (#3)"]
-    Lifecycle -->|Pair.Request / Response| Trans["協定轉譯 (#1)"]
-    Lifecycle -->|NormalizeRequest + Do| Upstream["上游調度 (#4)"]
-    Cred -->|BuildProvider| Upstream
-    Config["設定 (#7)"] --> HTTP
+    Agent["Codex / Claude Code"] -->|"MCP stdio"| ImageMCP["圖片 MCP 接入 (#8)"]
+    ImageMCP -->|"POST /v1/images/generations"| HTTP["HTTP 表面 (#5)"]
+    HTTP -->|"route"| Lifecycle["請求生命週期 (#6)"]
+    Lifecycle -->|"Resolve model"| Routing["模型路由 (#2)"]
+    Lifecycle -->|"Resolve credential"| Cred["憑證解析 (#3)"]
+    Lifecycle -->|"Pair.Request / Response"| Trans["協定轉譯 (#1)"]
+    Lifecycle -->|"NormalizeRequest + Do"| Upstream["上游調度 (#4)"]
+    Cred -->|"BuildProvider"| Upstream
+    Config["設定 (#7)"] -->|"HTTP server"| HTTP
+    Config -->|"MCP client"| ImageMCP
     Config --> Upstream
-    Trans -.讀.-> Lifecycle
+    Trans -.->|"讀"| Lifecycle
 ```
 
 - (#2) 路由的輸出是 (#4) 選 `Profile` 的輸入；二者共享 `route.Profile` 這個宣告結構。
@@ -170,6 +190,17 @@ go run ./... -- --port 9000           # 自訂埠
 pm2 start ecosystem.config.js
 ```
 
+`模型選項 (Model Options):`
+
+列出目前 proxy 內建的 Codex 模型，以及 Grok image-generation 可用的模型：
+
+```bash
+proxy options
+# `proxy models` 亦可使用
+```
+
+Codex 會先列出 `gpt-5`、`gpt-5-mini`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`；接著列出 OpenAI 的 `gpt-image-2` 與目前圖片 MCP 的 `grok-imagine-image-quality`。
+
 `公共 API 端點 (Public Endpoints):`
 
 | Path                          | Method | 用途                                                |
@@ -181,7 +212,7 @@ pm2 start ecosystem.config.js
 | `/v1/responses`               | POST   | OpenAI Responses 介面 (代理至各家上游)               |
 | `/v1/messages`                | POST   | Anthropic Messages 介面                              |
 | `/v1/messages/count_tokens`   | POST   | Anthropic 原生 token count 代理 (若 provider 支援)   |
-| `/v1/images/generations`      | POST   | xAI Imagine 圖片生成；API key / OAuth JSON pass-through |
+| `/v1/images/generations`      | POST   | OpenAI `gpt-image-*` / xAI Imagine 圖片生成；JSON pass-through |
 | `/admin/accounts`             | GET    | 預留 — `notImplemented`                             |
 | `/admin/stats`                | GET    | 預留 — `notImplemented`                             |
 | `/admin/reload`               | POST   | 預留 — `notImplemented`                             |
@@ -215,13 +246,64 @@ xai-messages/grok-4.5                     → xai (強制走 Messages)
 - OAuth response 的 `x-grok-context-window`、`x-grok-max-completion-tokens`、`x-models-etag`、`x-should-retry` 會在成功與錯誤回應中安全轉送。
 - xAI 登入、token refresh 與持久化仍由 `github.com/bizshuk/auth` 的 `xai_oauth` device flow 負責；本專案實作的是三種 inference wire protocol，不代理 Grok Conversations / Workspaces 產品 API。
 
-`xAI Imagine image generation contract`:
+`Image generation provider contract`:
 
-- downstream 呼叫 `POST /v1/images/generations`；必要欄位為 `model` 與 `prompt`，其餘 `n` / `aspect_ratio` / `resolution` / `response_format` 及未知欄位原樣轉送。
-- xAI API key 與 OAuth 都直接呼叫 `https://api.x.ai/v1/images/generations`；OAuth 使用既有 resolver 換發後的 access token 作 Bearer。
+- downstream 呼叫 `POST /v1/images/generations`；必要欄位為 `model` 與 `prompt`，其餘欄位原樣轉送。
+- `gpt-image-*` 與 `dall-e-*` model 使用 `openai` API-key credential，直接呼叫 `https://api.openai.com/v1/images/generations`。
+- xAI model 使用 `xai` API-key 或 OAuth credential，直接呼叫 `https://api.x.ai/v1/images/generations`；OAuth 使用既有 resolver 換發後的 access token 作 Bearer。
+- OpenAI OAuth credential 會解析成 Codex profile；Codex profile 不提供圖片 endpoint，因此不會把 Codex OAuth token 當作 OpenAI API key 使用。
 - Imagine OAuth request 不帶 inference-only 的 `X-XAI-Token-Auth`、`x-authenticateresponse` 或 `x-grok-model-override`。
 - upstream status、safe headers 與 JSON body 原樣回傳；若 client 要儲存圖片，應送 `response_format: "b64_json"` 並由 client-side MCP tool 解碼。
 - timeout 對齊 Grok Build：總請求 `300s`、response-header wait `240s`。
+
+### Codex / Claude Code 圖片生成 Plugin
+
+Plugin 只負責啟動 `stdio MCP` server；`proxy` binary 與 HTTP proxy server 是兩個獨立程序。先安裝 binary，並另行啟動 HTTP proxy：
+
+```bash
+go install .
+proxy --port 8317
+```
+
+`Codex` 安裝：
+
+```bash
+export PROXY_IMAGE_BASE_URL="http://127.0.0.1"
+export PROXY_IMAGE_PORT="8317"
+export PROXY_IMAGE_API_KEY="sk-..."
+export PROXY_IMAGE_MODEL="grok-imagine-image-quality"
+export PROXY_IMAGE_OUTPUT_DIR="images"
+
+codex plugin marketplace add .
+codex plugin add proxy-imagegen@proxy-local
+```
+
+`Codex` plugin 透過 `env_vars` 從啟動 Codex 的環境轉送設定；變更後需開新 session。`PROXY_IMAGE_API_KEY` 必填，也可改用既有的 `AGENTSDK_PROXY_API_KEY`。
+
+`Claude Code` 安裝：
+
+```bash
+export PROXY_IMAGE_API_KEY="sk-..."
+
+claude plugin marketplace add .
+claude plugin install proxy-imagegen@proxy-local \
+  --config base_url=http://127.0.0.1 \
+  --config port=8317 \
+  --config api_key="$PROXY_IMAGE_API_KEY" \
+  --config model=grok-imagine-image-quality
+```
+
+安裝後可直接要求 agent 生成圖片，或呼叫 `/imagine <prompt>`。`generate_image` 會回傳 inline MCP image content，並預設把檔案寫到目前專案的 `images/`。
+
+| 設定 | 預設值 | 說明 |
+| --- | --- | --- |
+| `PROXY_IMAGE_BASE_URL` / `base_url` | `http://127.0.0.1` | Proxy scheme 與 host，不含 port |
+| `PROXY_IMAGE_PORT` / `port` | `8317` | Proxy HTTP port |
+| `PROXY_IMAGE_API_KEY` / `api_key` | 無 | Proxy 接受的 Bearer key，必填 |
+| `PROXY_IMAGE_MODEL` / `model` | `grok-imagine-image-quality` | 工具未指定 `model` 時使用 |
+| `PROXY_IMAGE_OUTPUT_DIR` | `images` | Codex 可覆寫；相對路徑必須留在專案內 |
+
+若要使用 OpenAI `gpt-image-2`，在 proxy 執行環境提供 `OPENAI_API_KEY`，並把 `PROXY_IMAGE_MODEL` / plugin `model` 設為 `gpt-image-2`；MCP 連回 proxy 的 `PROXY_IMAGE_API_KEY` 仍是另一組 proxy access key。
 
 `HTTP client 設定範例 (Client Config):`
 

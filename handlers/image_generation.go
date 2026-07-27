@@ -14,16 +14,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const XAI_PROVIDER_FAMILY = "xai"
+const (
+	XAI_PROVIDER_FAMILY    = "xai"
+	OPENAI_PROVIDER_FAMILY = "openai"
+)
 
 type imageGenerationRequestMetadata struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
 }
 
-// HandleImageGenerations returns an OpenAI-compatible xAI image-generation
+// HandleImageGenerations returns an OpenAI-compatible image-generation
 // handler. The request and response JSON remain unchanged; this layer only
-// resolves credentials, enforces bounds, and owns the upstream lifecycle.
+// selects the provider from the model name, resolves credentials, enforces
+// bounds, and owns the upstream lifecycle.
 func (h *Handler) HandleImageGenerations() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, err := h.readRequestBody(c)
@@ -38,12 +42,13 @@ func (h *Handler) HandleImageGenerations() gin.HandlerFunc {
 		}
 
 		requestIDValue := requestID(c.GetHeader("x-request-id"))
-		credential, err := h.credentials.Resolve(c.Request.Context(), XAI_PROVIDER_FAMILY)
+		providerFamily := imageProviderFamily(metadata.Model)
+		credential, err := h.credentials.Resolve(c.Request.Context(), providerFamily)
 		if err != nil {
 			h.writeError(c, model.FORMAT_OPENAI_RESPONSES, err)
 			return
 		}
-		profile, _, err := h.catalog.ResolveProfile(XAI_PROVIDER_FAMILY, credential.Kind, nil)
+		profile, _, err := h.catalog.ResolveProfile(providerFamily, credential.Kind, nil)
 		if err != nil {
 			h.writeError(c, model.FORMAT_OPENAI_RESPONSES, err)
 			return
@@ -52,7 +57,7 @@ func (h *Handler) HandleImageGenerations() gin.HandlerFunc {
 		slog.LogAttrs(c.Request.Context(), slog.LevelInfo, "proxy image generation routed",
 			slog.String("request_id", requestIDValue),
 			slog.String("model", metadata.Model),
-			slog.String("routed_family", XAI_PROVIDER_FAMILY),
+			slog.String("routed_family", providerFamily),
 			slog.String("provider", profile.ID),
 			slog.String("credential_kind", string(credential.Kind)),
 		)
@@ -106,6 +111,14 @@ func (h *Handler) HandleImageGenerations() gin.HandlerFunc {
 		}
 		c.Data(response.StatusCode, contentType, responseBody)
 	}
+}
+
+func imageProviderFamily(modelName string) string {
+	normalized := strings.ToLower(strings.TrimSpace(modelName))
+	if strings.HasPrefix(normalized, "gpt-image-") || strings.HasPrefix(normalized, "dall-e-") {
+		return OPENAI_PROVIDER_FAMILY
+	}
+	return XAI_PROVIDER_FAMILY
 }
 
 func decodeImageGenerationRequest(body []byte) (imageGenerationRequestMetadata, error) {

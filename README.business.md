@@ -2,7 +2,7 @@
 
 ## 業務目的 (Purpose)
 
-`proxy` 是給 LLM CLI 工具 (Claude Code、Codex CLI、以及任何相容 OpenAI/Anthropic 介面的客戶端) 使用的單機 LLM API 閘道代理。它讓使用者能用同一組 API key 與 OAuth 登入狀態，把不同供應商 (Anthropic / OpenAI / xAI / Google Gemini / MiniMax / Codex OAuth / Antigravity / Ollama) 的模型暴露為三種業界標準介面 (Anthropic Messages、OpenAI Chat Completions、OpenAI Responses)，客戶端可以「指 model 名」或「加 provider qualifier」就能路由到對應供應商，而**不需要在客戶端做格式轉換**，也**不需要為每家供應商維護各自的 key**。
+`proxy` 是給 LLM CLI 工具 (Claude Code、Codex CLI、以及任何相容 OpenAI/Anthropic 介面的客戶端) 使用的單機 LLM API 閘道代理。它讓使用者能用同一組 API key 與 OAuth 登入狀態，把不同供應商 (Anthropic / OpenAI / xAI / Google Gemini / MiniMax / Codex OAuth / Antigravity / Ollama) 的模型暴露為三種業界標準介面 (Anthropic Messages、OpenAI Chat Completions、OpenAI Responses)，客戶端可以「指 model 名」或「加 provider qualifier」就能路由到對應供應商，而**不需要在客戶端做格式轉換**，也**不需要為每家供應商維護各自的 key**。圖片生成另以 OpenAI-compatible `/v1/images/generations` 暴露，內附的 Codex / Claude Code plugin 再把它轉成 `stdio MCP` 工具。
 
 ## 常見業務操作 (Common Operations)
 
@@ -10,6 +10,7 @@
 - 開發者透過 `auth login --provider X` 把多組 OAuth/API-key 憑證寫入 `~/.config/agentSDK/auth/`；proxy 在啟動時自動載入所有家族的憑證並註冊到 dispatcher
 - 開發者在 Claude Code 對話中送出 `claude-3-5-sonnet-20240620` → proxy 解析成 anthropic → 直接代理；改送 `openai/gpt-4o` → proxy 解析成 openai 並轉譯為 Chat Completions → 經 OpenAI 認證送出
 - 開發者要求串流 (`"stream": true`) 時收到 SSE 事件流；要求非串流但上游只支援串流 (例如 Codex OAuth 強制 `stream: true`) 時，proxy 自動 bridge 並回 JSON
+- 開發者在 Codex 或 Claude Code 呼叫 `generate_image`；MCP adapter 要求 Base64 回應、儲存至目前專案並同時回傳圖片內容與路徑
 - 開發者讀取 `/v1/models` 拿到目前 dispatcher 中所有 provider 的 catalog 合併模型清單
 - 開發者透過 `/v1/messages/count_tokens` 取得 Anthropic 原生 token 計數 (僅當目標 provider 有 `CountTokensEndpoint`)
 
@@ -27,12 +28,15 @@ flowchart LR
     end
     subgraph core [核心業務 Core]
         B["proxy HTTP 伺服器\n(:8317)"]
+        BMCP["proxy image-mcp\n(stdio)"]
     end
     subgraph downstream [下游 Downstream]
         C1["Anthropic Messages / OpenAI Chat / OpenAI Responses 三種介面回應"]
         C2["SSE 串流 frame (text/event-stream)"]
         C3["結構化上游錯誤日誌 + 業務 metrics"]
     end
+    A1 -->|"MCP tools/call"| BMCP
+    BMCP -->|"HTTP POST /v1/images/generations"| B
     A1 -->|"HTTP POST /v1/* (JSON)"| B
     A2 -->|"FileStore.List/Load/Save"| B
     A3 -->|"env fallback"| B
@@ -125,7 +129,7 @@ stateDiagram-v2
 - 路由保留政策：
     - `BuildProvider` 對未支援 family 直接 error (fail-closed)；`newDispatcherWithAuth` 對單一 family 失敗採 continue，不讓整個 dispatcher 掛掉
 - 介面契約：
-    - 公開介面僅 4 條 (`/v1/models` / `/v1/chat/completions` / `/v1/responses` / `/v1/messages`)，加 1 條 `count_tokens`；admin 端點 3 條皆 501 (`/admin/accounts` / `/admin/stats` / `/admin/reload`)
+    - 公開介面包含模型清單、三種文字協定、`count_tokens` 與圖片生成 (`/v1/models` / `/v1/chat/completions` / `/v1/responses` / `/v1/messages` / `/v1/messages/count_tokens` / `/v1/images/generations`)；admin 端點 3 條皆 501 (`/admin/accounts` / `/admin/stats` / `/admin/reload`)
 
 ## 風險偵測 (Risk Detection)
 
@@ -150,3 +154,4 @@ stateDiagram-v2
 - **設定載入 (`config/config.go` + `cmd/proxy.go` + `main.go`)**：viper 設定合併、預設值、cobra CLI、graceful shutdown — 不產生收入但是啟動必要 (支撐核心)
 - **SSE decoder (`model/sse.go`)**：bounded SSE 解析 + 寫出，是 streaming 路徑的工具層 (支撐核心)
 - **錯誤模型 (`model/error.go`)**：`ProxyError` 統一錯誤型別 + 依 source format 編碼，是 cross-cutting concern (支撐核心 — 三個領域都要用)
+- Codex / Claude Code 圖片 MCP 接入 (`mcpimage/*` / `plugins/proxy-imagegen`)：把既有圖片 HTTP 端點包成 agent 工具，負責 client 設定、Base64 解碼與專案檔案輸出

@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "proxy-imagegen": {
+      "type": "stdio",
+      "command": "proxy",
+      "args": [
+        "image-mcp"
+      ],
+      "env": {
+        "PROXY_IMAGE_BASE_URL": "${user_config.base_url}",
+        "PROXY_IMAGE_PORT": "${user_config.port}",
+        "PROXY_IMAGE_API_KEY": "${user_config.api_key}",
+        "PROXY_IMAGE_MODEL": "${user_config.model}",
+        "PROXY_IMAGE_OUTPUT_DIR": "images",
+        "CLAUDE_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}"
+      }
+    }
+  }
+}

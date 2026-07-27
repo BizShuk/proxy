@@ -43,6 +43,8 @@ func TestDefaultCatalogCapabilities(t *testing.T) {
 				model.FORMAT_OPENAI_RESPONSES: "/v1/responses",
 				model.FORMAT_OPENAI_CHAT:      "/v1/chat/completions",
 			},
+			imageGenerationBaseURL:  "https://api.openai.com",
+			imageGenerationEndpoint: "/v1/images/generations",
 		},
 		{
 			id: "openai-codex-oauth", preferred: model.FORMAT_OPENAI_RESPONSES,

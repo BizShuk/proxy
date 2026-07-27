@@ -105,10 +105,10 @@ func (c *Client) CountTokens(ctx context.Context, profile Profile, cred *authmod
 	return c.do(ctx, profile, cred, envelope, profile.CountTokensEndpoint, c.countTokensTimeout, false)
 }
 
-// GenerateImage sends an OpenAI-compatible image-generation request directly
-// to xAI's public API. OAuth credentials intentionally bypass the Grok
-// inference proxy because Grok Build uses api.x.ai for Imagine with both
-// credential kinds.
+// GenerateImage sends an OpenAI-compatible image-generation request to the
+// image endpoint declared by the selected profile. OAuth credentials
+// intentionally bypass provider inference base URLs when the profile's image
+// endpoint is public (for example, xAI Imagine).
 func (c *Client) GenerateImage(
 	ctx context.Context,
 	profile Profile,
@@ -210,7 +210,7 @@ func (c *Client) doWithHTTPClient(
 	forwardAllowlistedHeaders(profile, envelope.Headers, request.Header)
 	applyProviderHeaders(profile, cred, request.Header)
 	if imageGeneration {
-		applyXAIImageHeaders(request.Header)
+		applyImageGenerationHeaders(profile, request.Header)
 	} else {
 		applyXAIGrokOAuthHeaders(profile, cred, envelope, request.Header)
 	}
@@ -224,7 +224,10 @@ func (c *Client) doWithHTTPClient(
 	return response, nil
 }
 
-func applyXAIImageHeaders(header http.Header) {
+func applyImageGenerationHeaders(profile Profile, header http.Header) {
+	if !strings.EqualFold(profile.CredentialProvider, "xai") {
+		return
+	}
 	header.Set("x-grok-client-version", DEFAULT_XAI_GROK_CLIENT_VERSION)
 	header.Set("x-grok-client-identifier", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER)
 	header.Set("User-Agent", xaiGrokUserAgent())

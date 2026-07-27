@@ -1,0 +1,14 @@
+{
+  "name": "proxy-local",
+  "owner": {
+    "name": "BizShuk",
+    "email": "biz.shuk@gmail.com"
+  },
+  "description": "Local plugins for the proxy project.",
+  "plugins": [
+    {
+      "name": "proxy-imagegen",
+      "source": "./plugins/proxy-imagegen"
+    }
+  ]
+}

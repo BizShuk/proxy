@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "proxy-imagegen",
+  "displayName": "Proxy Image Generation",
+  "version": "0.1.0",
+  "description": "Generate images through the local proxy and save them in the active project.",
+  "author": {
+    "name": "BizShuk",
+    "email": "biz.shuk@gmail.com",
+    "url": "https://github.com/BizShuk"
+  },
+  "homepage": "https://github.com/BizShuk/proxy",
+  "repository": "https://github.com/BizShuk/proxy",
+  "keywords": [
+    "image-generation",
+    "mcp",
+    "proxy",
+    "xai"
+  ],
+  "defaultEnabled": false,
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "userConfig": {
+    "base_url": {
+      "type": "string",
+      "title": "Proxy base URL",
+      "description": "Proxy scheme and host without the port.",
+      "required": true,
+      "default": "http://127.0.0.1"
+    },
+    "port": {
+      "type": "number",
+      "title": "Proxy port",
+      "description": "TCP port exposed by the proxy.",
+      "required": true,
+      "default": 8317,
+      "min": 1,
+      "max": 65535
+    },
+    "api_key": {
+      "type": "string",
+      "title": "Proxy API key",
+      "description": "Bearer key accepted by the proxy.",
+      "sensitive": true,
+      "required": true
+    },
+    "model": {
+      "type": "string",
+      "title": "Default image model",
+      "description": "Image model used when a request does not choose one.",
+      "required": true,
+      "default": "grok-imagine-image-quality"
+    }
+  }
+}

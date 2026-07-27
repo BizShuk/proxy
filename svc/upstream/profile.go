@@ -29,6 +29,8 @@ const (
 	ANTHROPIC_VERSION            = "2023-06-01"
 	XAI_GROK_OAUTH_PROFILE_ID    = "xai-grok-oauth"
 	XAI_GROK_OAUTH_BASE_URL      = "https://cli-chat-proxy.grok.com/v1"
+	OPENAI_IMAGE_DEFAULT_MODEL   = "gpt-image-2"
+	XAI_GROK_IMAGE_DEFAULT_MODEL = "grok-imagine-image-quality"
 	XAI_GROK_DEFAULT_MAX_TOKENS  = 128_000
 	XAI_GROK_ENCRYPTED_REASONING = "reasoning.encrypted_content"
 
@@ -278,12 +280,14 @@ func DefaultCatalog() (*Catalog, error) {
 				model.FORMAT_OPENAI_RESPONSES: "/v1/responses",
 				model.FORMAT_OPENAI_CHAT:      "/v1/chat/completions",
 			},
-			Preferred:              model.FORMAT_OPENAI_RESPONSES,
-			AuthScheme:             AUTH_BEARER,
-			AllowedRequestHeaders:  slices.Clone(defaultRequestHeaders),
-			AllowedResponseHeaders: slices.Clone(defaultResponseHeaders),
-			AdvertisedModels:       []string{"gpt-", "o1-", "o3-"},
-			NormalizeRequest:       preserveRequest,
+			Preferred:               model.FORMAT_OPENAI_RESPONSES,
+			AuthScheme:              AUTH_BEARER,
+			AllowedRequestHeaders:   slices.Clone(defaultRequestHeaders),
+			AllowedResponseHeaders:  slices.Clone(defaultResponseHeaders),
+			ImageGenerationBaseURL:  "https://api.openai.com",
+			ImageGenerationEndpoint: "/v1/images/generations",
+			AdvertisedModels:        []string{"gpt-", "o1-", "o3-"},
+			NormalizeRequest:        preserveRequest,
 		},
 		{
 			ID:                             "openai-codex-oauth",

@@ -1,0 +1,20 @@
+{
+  "name": "proxy-local",
+  "interface": {
+    "displayName": "Proxy Local"
+  },
+  "plugins": [
+    {
+      "name": "proxy-imagegen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/proxy-imagegen"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

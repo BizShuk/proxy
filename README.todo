@@ -2,13 +2,11 @@
 
 - [ ] claude /fork can't read the AGENTSDK_PROXY_API_KEY
 
-## Claude Code image generation client
-
-- [ ] 實作 Claude Code `image_gen` MCP tool，呼叫 proxy `POST /v1/images/generations`
-- [ ] 加入 `/imagine <prompt>` Skill，原樣把 `$ARGUMENTS` 交給 `image_gen`
-- [ ] MCP tool 要求 `response_format: "b64_json"`、解碼並儲存至 project `images/`，回傳可點擊的相對路徑
-
 ## Archive
 
+- [x] 2026-07-27 — 完成 Codex / Claude Code `generate_image` MCP tool，呼叫 proxy `POST /v1/images/generations`
+- [x] 2026-07-27 — 加入 `/imagine <prompt>` Skill，原樣把 `$ARGUMENTS` 交給 `generate_image`
+- [x] 2026-07-27 — MCP tool 固定要求 `b64_json`、驗證並儲存至 project `images/`，回傳 image content 與相對路徑
 - [x] 2026-07-27 — 完成 xAI API key / OAuth 的 `POST /v1/images/generations` proxy protocol
+- [x] 2026-07-27 — 加入 OpenAI `gpt-image-2` API-key image provider，保留 xAI Imagine routing
 - [x] 2026-07-27 — 完成 xAI Grok OAuth 的 Responses、Chat Completions、Messages inference protocol

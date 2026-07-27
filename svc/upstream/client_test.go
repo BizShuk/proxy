@@ -150,6 +150,35 @@ func TestClientGenerateImageUsesDirectXAIAPIForAPIKeyAndOAuth(t *testing.T) {
 	}
 }
 
+func TestClientGenerateImageUsesOpenAIImageAPIWithoutGrokHeaders(t *testing.T) {
+	var got http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"b64_json":"aW1hZ2U="}]}`)
+	}))
+	defer server.Close()
+
+	profile := defaultProfile(t, "openai-api")
+	profile.ImageGenerationBaseURL = server.URL
+	client, err := NewClient(server.Client(), timeoutConfig())
+	require.NoError(t, err)
+
+	response, err := client.GenerateImage(context.Background(), profile, &authmodel.Credential{
+		Provider: "openai", Kind: authmodel.KIND_API_KEY, APIKey: "openai-api-key",
+	}, model.RequestEnvelope{
+		Model: "gpt-image-2",
+		Body:  []byte(`{"model":"gpt-image-2","prompt":"a space cat"}`),
+	})
+	require.NoError(t, err)
+	defer response.Body.Close()
+
+	assert.Equal(t, "Bearer openai-api-key", got.Get("Authorization"))
+	assert.Empty(t, got.Get("x-grok-client-version"))
+	assert.Empty(t, got.Get("x-grok-client-identifier"))
+	assert.Empty(t, got.Get("x-grok-model-override"))
+}
+
 func TestClientGenerateImageRejectsUnavailableClient(t *testing.T) {
 	profile := defaultProfile(t, "xai")
 	credential := &authmodel.Credential{

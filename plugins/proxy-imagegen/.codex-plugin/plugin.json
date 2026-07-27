@@ -1,0 +1,50 @@
+{
+  "name": "proxy-imagegen",
+  "version": "0.1.0",
+  "description": "Generate images through the local proxy and save them in the active project.",
+  "author": {
+    "name": "BizShuk",
+    "email": "biz.shuk@gmail.com",
+    "url": "https://github.com/BizShuk"
+  },
+  "homepage": "https://github.com/BizShuk/proxy",
+  "repository": "https://github.com/BizShuk/proxy",
+  "keywords": [
+    "image-generation",
+    "mcp",
+    "proxy",
+    "xai"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "proxy-imagegen": {
+      "command": "proxy",
+      "args": [
+        "image-mcp"
+      ],
+      "env_vars": [
+        "PROXY_IMAGE_BASE_URL",
+        "PROXY_IMAGE_PORT",
+        "PROXY_IMAGE_API_KEY",
+        "AGENTSDK_PROXY_API_KEY",
+        "PROXY_IMAGE_MODEL",
+        "PROXY_IMAGE_OUTPUT_DIR"
+      ]
+    }
+  },
+  "interface": {
+    "displayName": "Proxy Image Generation",
+    "shortDescription": "Generate images through your local proxy.",
+    "longDescription": "Connect Codex to the proxy image-generation endpoint, return inline image content, and save generated files in the active project.",
+    "developerName": "BizShuk",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Generate an image and save it in this project.",
+      "Create a 16:9 image from my description."
+    ]
+  }
+}
