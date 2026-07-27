@@ -8,7 +8,7 @@ proxy/
 ├── go.mod / go.sum               # module github.com/bizshuk/proxy (go 1.26.0)
 ├── ecosystem.config.js           # pm2 部署 (namespace: Service)
 ├── settings.example.json         # 範例設定 (host/port/auth-dir/api-keys/timeouts/...)
-├── scripts/                      # *.http 範例 (anthropic / minimax / openai)
+├── scripts/                      # *.http 範例 + realtime-webrtc.html browser client
 ├── cmd/
 │   ├── proxy.go                  # cobra ProxyCmd; 預設 --port 8317
 │   ├── options.go                # proxy options/models; Codex + OpenAI/Grok image model catalog
@@ -30,6 +30,7 @@ proxy/
 │   ├── middleware.go             # requireAPIKey / corsLocalhost / rateLimitPerIP
 │   ├── observability.go          # TransformObserver (OTel counters + slog)
 │   ├── codex_log.go              # Codex OAuth 請求脫敏 metadata log
+│   ├── realtime.go               # OpenAI Realtime WebSocket/WebRTC transport proxy
 │   └── upstream_error_log.go     # 4xx/5xx 與 stream 終止結構化日誌
 ├── model/                        # 跨層共用 wire model
 │   ├── format.go                 # Format enum (anthropic-messages/openai-chat/openai-responses)
@@ -61,6 +62,8 @@ proxy/
 │       ├── dispatcher_oauth.go   # NewDispatcherWithAuth[AndEnv] (走 agentsdk credential.Source)
 │       ├── credential.go         # CredentialResolver (包 auth/svc.Resolver)
 │       ├── client.go             # Client.Do / CountTokens / GenerateImage + header/secret 套用
+│       ├── client.go             # Client.Do / CountTokens + header/secret 套用
+│       ├── realtime.go           # 固定 Realtime endpoints + API-key target/header
 │       └── config.go             # TimeoutConfig
 └── docs/
     ├── terminology.md            # 領域術語的單一定義來源
@@ -75,7 +78,7 @@ proxy/
 - CLI: `github.com/spf13/cobra` v1.10.2 + `github.com/spf13/viper` v1.20.1
 - Config / logging / middleware: `github.com/bizshuk/gosdk` v1.2.5
 - Auth: `github.com/bizshuk/auth` v0.0.0-20260718180648-a05ed97812a8 (FileStore + svc.Resolver + provider.For)
-- Provider SDK: `github.com/bizshuk/agentsdk` v0.0.15 (core + provider/* via dispatcher)
+- Provider SDK: `github.com/bizshuk/agentsdk` v0.0.15 (core + provider/\* via dispatcher)
 - MCP SDK: `github.com/modelcontextprotocol/go-sdk` v1.6.0
 - Observability: `log/slog` (stdlib) + `go.opentelemetry.io/otel` v1.44.0
 - Test: `github.com/stretchr/testify` v1.11.1
@@ -109,32 +112,35 @@ proxy/
 - auth storage provider ID 與 Agents SDK provider ID 不同名 (`xai` vs `grok`、`openai` vs `codex`)，這個邊界映射由 agentsdk 的 `provider/credential` 擁有 (`credential.RouteID` / `credential.Names`)，proxy 不再自備路由表。舊碼的 `familiesInDefaultOrder` 直接向 resolver 查 `codex`，但 auth 從不以該名存憑證，故 codex 憑證實際上永遠只能從 env fallback 進來；改用 `credential.Names()` 後修正。
 - `core.Provider` 是純能力介面 (`Generate` / `Stream`)，不帶 `ID()` / `Models()`：名字屬於索引 adapter 的 registry，不屬於 adapter 自身。因此 `Dispatcher.Set(name, adapter)` 由呼叫端給名，`AdvertisedModels` 走 `provider.Catalog(name)`（免憑證、免 I/O）。
 - 憑證不再於建構時快照：`credential.Source.Decorator()` 每次呼叫重新向 auth store 解析，token 輪替不需 `Dispatcher.Replace`。startup 仍探測一次，讓沒有憑證的 family 不出現在 `/v1/models`。
+- OpenAI Realtime 是獨立 transport，不加入 `model.ALL_FORMATS`：`/v1/realtime` 透過 WebSocket 雙向 tunnel；`/v1/realtime/calls` 與 `/v1/realtime/client_secrets` 代理 WebRTC 初始化。三者保留 OpenAI GA event schema，不做 pairwise transform。
+- Realtime 只接受標準 OpenAI API-key credential，不使用 ChatGPT Codex OAuth；downstream authorization 永不透傳，音訊與 event payload 永不寫入 log。
 
 ## 模組對應 (Module Mapping)
 
-| 業務領域 (Domain)                           | 套件/模組 (Package/Module)                                                                      | 進入點 (Entry Point)                                        |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 協定轉譯 (Protocol Translation)             | `svc/transform`, `model/anthropic`, `model/chat`, `model/responses`                             | `transform.NewDefaultRegistry()` → `Registry.Lookup`        |
-| 模型路由 (Model Routing)                    | `svc/route`, `svc/upstream` (`ResolveProfile` / `NewRouter`)                                    | `Router.Resolve(format, modelName)`                         |
-| 憑證解析 (Credential Resolution)            | `svc/upstream` (`CredentialResolver`), `agentsdk/provider/credential`, `bizshuk/auth/svc`       | `CredentialResolver.Resolve` (request path) / `credential.NewAutoSource` (wiring) |
-| 上游調度 (Upstream Dispatch)                | `svc/upstream` (`Profile` / `Catalog` / `Dispatcher` / `Client`)                                | `DefaultCatalog()` + `Client.Do`                            |
-| HTTP 公開介面 (HTTP Surface)                | `handlers` (`Server` / `middleware` / `observability`)                                          | `Server.New(cfg).Run(ctx)`                                  |
-| 請求生命週期 (Request Lifecycle)            | `handlers/handler.go`, `handlers/codex_log.go`, `handlers/upstream_error_log.go`                | `Handler.Handle(format)`, `Handler.HandleModels`            |
-| 圖片生成 (Image Generation)                 | `handlers/image_generation.go`, `svc/upstream/client.go`, `svc/upstream/profile.go`             | `Handler.HandleImageGenerations` → `Client.GenerateImage`   |
-| 圖片 MCP 接入 (Image MCP Integration)       | `mcpimage`, `cmd/image_mcp.go`, `plugins/proxy-imagegen`                                        | `proxy image-mcp` → `generate_image`                        |
-| 設定與生命週期 (Config & Lifecycle)         | `config`, `cmd`, `main`, `ecosystem.config.js`                                                  | `cmd.ProxyCmd.RunE`                                         |
+| 業務領域 (Domain)                       | 套件/模組 (Package/Module)                                                                | 進入點 (Entry Point)                                                              |
+| --------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 協定轉譯 (Protocol Translation)         | `svc/transform`, `model/anthropic`, `model/chat`, `model/responses`                       | `transform.NewDefaultRegistry()` → `Registry.Lookup`                              |
+| 模型路由 (Model Routing)                | `svc/route`, `svc/upstream` (`ResolveProfile` / `NewRouter`)                              | `Router.Resolve(format, modelName)`                                               |
+| 憑證解析 (Credential Resolution)        | `svc/upstream` (`CredentialResolver`), `agentsdk/provider/credential`, `bizshuk/auth/svc` | `CredentialResolver.Resolve` (request path) / `credential.NewAutoSource` (wiring) |
+| 上游調度 (Upstream Dispatch)            | `svc/upstream` (`Profile` / `Catalog` / `Dispatcher` / `Client`)                          | `DefaultCatalog()` + `Client.Do`                                                  |
+| HTTP 公開介面 (HTTP Surface)            | `handlers` (`Server` / `middleware` / `observability`)                                    | `Server.New(cfg).Run(ctx)`                                                        |
+| 請求生命週期 (Request Lifecycle)        | `handlers/handler.go`, `handlers/codex_log.go`, `handlers/upstream_error_log.go`          | `Handler.Handle(format)`, `Handler.HandleModels`                                  |
+| 圖片生成 (Image Generation)             | `handlers/image_generation.go`, `svc/upstream/client.go`, `svc/upstream/profile.go`       | `Handler.HandleImageGenerations` → `Client.GenerateImage`                         |
+| 圖片 MCP 接入 (Image MCP Integration)   | `mcpimage`, `cmd/image_mcp.go`, `plugins/proxy-imagegen`                                  | `proxy image-mcp` → `generate_image`                                              |
+| 即時語音傳輸 (Realtime Voice Transport) | `handlers/realtime.go`, `svc/upstream/realtime.go`                                        | `RealtimeHandler.HandleWebSocket`, `HandleHandshake`                              |
+| 設定與生命週期 (Config & Lifecycle)     | `config`, `cmd`, `main`, `ecosystem.config.js`                                            | `cmd.ProxyCmd.RunE`                                                               |
 
 ## 觀測鏈 (Observability Chain)
 
 `LOG_LEVEL=debug` 時 proxy 沿 request lifecycle 發出 4-5 個 `proxy debug payload` structured log records:
 
-| Stage | 觸發時機 | 內容 |
-| --- | --- | --- |
-| `req.before` | client body 讀完 + metadata parse 後 | 原始 client body (≤ 64 KiB) |
-| `req.now` | transform + NormalizeRequest 都成功後 | 送上游的 wire body |
-| `resp.before` | upstream 4xx/5xx 時 | upstream 錯誤 body |
-| `resp.now` | 2xx + non-stream 成功路徑 | response transform 後的 body |
-| `req.failed` | 任何內部步驟失敗時 | `error_code` / `error_kind` / `error_message` |
+| Stage         | 觸發時機                              | 內容                                          |
+| ------------- | ------------------------------------- | --------------------------------------------- |
+| `req.before`  | client body 讀完 + metadata parse 後  | 原始 client body (≤ 64 KiB)                   |
+| `req.now`     | transform + NormalizeRequest 都成功後 | 送上游的 wire body                            |
+| `resp.before` | upstream 4xx/5xx 時                   | upstream 錯誤 body                            |
+| `resp.now`    | 2xx + non-stream 成功路徑             | response transform 後的 body                  |
+| `req.failed`  | 任何內部步驟失敗時                    | `error_code` / `error_kind` / `error_message` |
 
 完整鏈路圖、success/failure sequence diagram、stage 對照表：
 
@@ -202,3 +208,4 @@ go test ./...
     - dot-form 鍵 (例如 `server.port`、`body-limit-mb` 在 mapstructure 但 `timeouts.messages-ms` 在 mapstructure 但帶 dash) → `settings.json` + `settings.local.json`
     - 無 dash 的 dot-form 鍵可被 `APP_SERVER_PORT` 等 env 變數覆寫 (gosdk viper 預設)
     - 帶 dash 的鍵 (例如 `auth-dir`、`body-limit-mb`、`timeouts.*-ms`) 是 file-only
+    - Realtime 限制 (`realtime.max-connections`、`realtime.max-handshake-bytes`) 同樣是 file-only；`realtime.enabled` 可由 `APP_REALTIME_ENABLED` 覆寫

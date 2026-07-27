@@ -2,6 +2,12 @@
 
 - [ ] claude /fork can't read the AGENTSDK_PROXY_API_KEY
 
+## GPT Realtime Voice
+
+- [ ] Add isolated WebSocket upgrade and WebRTC handshake integration tests
+- [ ] Run one live `gpt-realtime-2.1` audio session through each supported transport
+- [ ] Add active Realtime connection and handshake failure metrics
+
 ## Archive
 
 - [x] 2026-07-27 — 完成 Codex / Claude Code `generate_image` MCP tool，呼叫 proxy `POST /v1/images/generations`
@@ -10,3 +16,5 @@
 - [x] 2026-07-27 — 完成 xAI API key / OAuth 的 `POST /v1/images/generations` proxy protocol
 - [x] 2026-07-27 — 加入 OpenAI `gpt-image-2` API-key image provider，保留 xAI Imagine routing
 - [x] 2026-07-27 — 完成 xAI Grok OAuth 的 Responses、Chat Completions、Messages inference protocol
+
+## Archive

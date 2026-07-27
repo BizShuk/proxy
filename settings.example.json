@@ -13,6 +13,11 @@
     "stream-messages-ms": 600000,
     "count-tokens-ms": 30000
   },
+  "realtime": {
+    "enabled": true,
+    "max-connections": 32,
+    "max-handshake-bytes": 1048576
+  },
   "stats": {
     "enabled": true
   },

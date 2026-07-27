@@ -38,9 +38,10 @@ const (
 
 // Server holds the assembled engine and its runtime config.
 type Server struct {
-	cfg     *pxconfig.Config
-	engine  *gin.Engine
-	handler *Handler
+	cfg      *pxconfig.Config
+	engine   *gin.Engine
+	handler  *Handler
+	realtime *RealtimeHandler
 }
 
 // New builds the engine with the full middleware stack and route table.
@@ -104,6 +105,18 @@ func New(cfg *pxconfig.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server handler: %w", err)
 	}
+	var realtimeHandler *RealtimeHandler
+	if cfg.Realtime.Enabled {
+		realtimeHandler, err = NewRealtimeHandler(RealtimeHandlerDeps{
+			Catalog:           catalog,
+			Credentials:       credentials,
+			MaxConnections:    cfg.Realtime.MaxConnections,
+			MaxHandshakeBytes: cfg.Realtime.MaxHandshakeBytes,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("new proxy server realtime handler: %w", err)
+		}
+	}
 	// Default to release mode; GIN_MODE env var still overrides when set.
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
@@ -118,7 +131,7 @@ func New(cfg *pxconfig.Config) (*Server, error) {
 	router.HealthRouterGroup(engine)
 	router.PingRouterGroup(engine)
 
-	s := &Server{cfg: cfg, engine: engine, handler: handler}
+	s := &Server{cfg: cfg, engine: engine, handler: handler, realtime: realtimeHandler}
 	s.registerRoutes()
 	return s, nil
 }
@@ -138,6 +151,11 @@ func (s *Server) registerRoutes() {
 		v1.POST("/messages", s.handler.Handle(model.FORMAT_ANTHROPIC_MESSAGES))
 		v1.POST("/messages/count_tokens", s.handler.HandleCountTokens())
 		v1.POST("/images/generations", s.handler.HandleImageGenerations())
+		if s.realtime != nil {
+			v1.GET("/realtime", s.realtime.HandleWebSocket())
+			v1.POST("/realtime/calls", s.realtime.HandleHandshake(upstream.OPENAI_REALTIME_CALLS_ENDPOINT))
+			v1.POST("/realtime/client_secrets", s.realtime.HandleHandshake(upstream.OPENAI_REALTIME_CLIENT_SECRETS_ENDPOINT))
+		}
 	}
 
 	admin := s.engine.Group("/admin", requireAPIKey(keys))

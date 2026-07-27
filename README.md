@@ -79,7 +79,7 @@
 
 ### 5. HTTP 公開介面與中介層 (HTTP Surface & Middleware)
 
-把代理伺服器的 HTTP 表面組裝起來：路由表、認證、CORS、rate limit、metrics。
+把代理伺服器的 HTTP 表面組裝起來：路由表、認證、CORS、rate limit、metrics，以及 OpenAI Realtime 長連線入口。
 
 `領域流程 (Domain Flow):`
 
@@ -88,6 +88,7 @@
 3. 同一 group 上再掛 `rateLimitPerIP` (per-IP 60 req/min 固定窗口)
 4. `router.HealthRouterGroup` / `router.PingRouterGroup` 提供 `/healthz` / `/ping`，自訂 `/health` 與 `/v1/*`、`/admin/*` 由 handler 與 group 註冊；`/v1/images/generations` 由獨立 handler 做 OpenAI-compatible JSON pass-through，不進三格式 transform matrix
 5. `NewTransformObserver` 註冊 OTel counters：`agentsdk.proxy.transform.warnings`、`agentsdk.proxy.transform.losses`
+6. `RealtimeHandler` 在同一 `/v1` 認證群組提供 WebSocket tunnel、WebRTC unified call 與 ephemeral client secret 三條 OpenAI-compatible 路徑
 
 `核心實體 (Key Entities):` `Server`, `gin.Engine`, `TransformObserver`, `api-keys`, `rateBucket`
 
@@ -133,6 +134,7 @@
 
 ---
 
+<<<<<<< Updated upstream
 ### 8. 圖片生成 MCP 接入 (Image Generation MCP Integration)
 
 以同一個 `stdio MCP` server 接入 Codex 與 Claude Code，不要求兩套 client 各自實作 xAI wire protocol。
@@ -147,6 +149,27 @@
 `核心實體 (Key Entities):` `mcpimage.Config`, `ProxyClient`, `Generator`, `generate_image`
 
 `相關處理器 (Related Handlers):` `mcpimage/config.go`, `mcpimage/client.go`, `mcpimage/tool.go`, `mcpimage/server.go`, `cmd/image_mcp.go`, `plugins/proxy-imagegen`
+=======
+### 8. GPT 即時語音 (GPT Realtime Voice)
+
+Realtime 語音不是第四種 request/response format，而是持續存在的雙向 session transport。proxy 保留 OpenAI GA Realtime event schema，不讓它進入既有 pairwise transform matrix。
+
+`領域流程 (Domain Flow):`
+
+1. 瀏覽器或行動端透過 `POST /v1/realtime/calls` 建立 WebRTC session，或先由 `POST /v1/realtime/client_secrets` 取得短效 token 後直連 OpenAI
+2. server media pipeline 透過 `GET /v1/realtime?model=...` 升級成 WebSocket，雙向透傳 JSON event 與 Base64 audio chunk
+3. downstream 使用 proxy API key；`CredentialResolver` 只接受標準 OpenAI API-key credential，移除 downstream authorization 後才注入 upstream credential
+4. `RealtimeHandler` 固定 upstream path、限制握手 body 與同時 WebSocket session 數；不解析、不轉換、不記錄 audio/event payload
+5. `OpenAI-Safety-Identifier` 可透過 proxy 傳入，但日誌只記錄是否存在，不記錄其值
+
+`核心實體 (Key Entities):` `RealtimeHandler`, `RealtimeHandlerDeps`, `upstream.RealtimeTarget`, `RealtimeConfig`
+
+`相關處理器 (Related Handlers):` `handlers/realtime.go`, `svc/upstream/realtime.go`, `handlers/server.go`, `config/config.go`
+
+完整協定、failure semantics 與驗收證據：
+
+📄 [`docs/plans/2026-07-26-gpt-realtime-voice-proxy.md`](docs/plans/2026-07-26-gpt-realtime-voice-proxy.md)
+>>>>>>> Stashed changes
 
 ---
 
@@ -154,18 +177,32 @@
 
 ```mermaid
 flowchart LR
+<<<<<<< Updated upstream
     Agent["Codex / Claude Code"] -->|"MCP stdio"| ImageMCP["圖片 MCP 接入 (#8)"]
     ImageMCP -->|"POST /v1/images/generations"| HTTP["HTTP 表面 (#5)"]
     HTTP -->|"route"| Lifecycle["請求生命週期 (#6)"]
+=======
+    HTTP["HTTP 表面 (#5)"] -->|"route"| Lifecycle["請求生命週期 (#6)"]
+>>>>>>> Stashed changes
     Lifecycle -->|"Resolve model"| Routing["模型路由 (#2)"]
     Lifecycle -->|"Resolve credential"| Cred["憑證解析 (#3)"]
     Lifecycle -->|"Pair.Request / Response"| Trans["協定轉譯 (#1)"]
     Lifecycle -->|"NormalizeRequest + Do"| Upstream["上游調度 (#4)"]
+<<<<<<< Updated upstream
     Cred -->|"BuildProvider"| Upstream
     Config["設定 (#7)"] -->|"HTTP server"| HTTP
     Config -->|"MCP client"| ImageMCP
     Config --> Upstream
     Trans -.->|"讀"| Lifecycle
+=======
+    Realtime["GPT Realtime (#8)"] -->|"native event tunnel"| Upstream
+    Realtime -->|"Resolve OpenAI API key"| Cred
+    HTTP -->|"upgrade / handshake"| Realtime
+    Cred -->|"BuildProvider"| Upstream
+    Config["設定 (#7)"] -->|"bootstrap"| HTTP
+    Config -->|"timeout / limits"| Upstream
+    Trans -.讀.-> Lifecycle
+>>>>>>> Stashed changes
 ```
 
 - (#2) 路由的輸出是 (#4) 選 `Profile` 的輸入；二者共享 `route.Profile` 這個宣告結構。
@@ -212,7 +249,13 @@ Codex 會先列出 `gpt-5`、`gpt-5-mini`、`gpt-5.6-sol`、`gpt-5.6-terra`、`g
 | `/v1/responses`               | POST   | OpenAI Responses 介面 (代理至各家上游)               |
 | `/v1/messages`                | POST   | Anthropic Messages 介面                              |
 | `/v1/messages/count_tokens`   | POST   | Anthropic 原生 token count 代理 (若 provider 支援)   |
+<<<<<<< Updated upstream
 | `/v1/images/generations`      | POST   | OpenAI `gpt-image-*` / xAI Imagine 圖片生成；JSON pass-through |
+=======
+| `/v1/realtime?model=...`      | GET    | OpenAI Realtime WebSocket event/audio tunnel          |
+| `/v1/realtime/calls`          | POST   | WebRTC unified-interface SDP/session 建立             |
+| `/v1/realtime/client_secrets` | POST   | 建立瀏覽器/行動端使用的短效 Realtime credential      |
+>>>>>>> Stashed changes
 | `/admin/accounts`             | GET    | 預留 — `notImplemented`                             |
 | `/admin/stats`                | GET    | 預留 — `notImplemented`                             |
 | `/admin/reload`               | POST   | 預留 — `notImplemented`                             |
@@ -315,7 +358,20 @@ ANTHROPIC_API_KEY=sk-...
 # Codex CLI
 OPENAI_BASE_URL=http://localhost:8317/v1
 OPENAI_API_KEY=sk-...
+
+# Server-side Realtime WebSocket
+websocat -H='Authorization: Bearer sk-...' \
+  'ws://localhost:8317/v1/realtime?model=gpt-realtime-2.1'
 ```
+
+`瀏覽器 Realtime WebRTC sample:`
+
+```bash
+python3 -m http.server 8080 --directory scripts
+open http://localhost:8080/realtime-webrtc.html
+```
+
+頁面會把 SDP 與 session config 送到 proxy 的 `/v1/realtime/calls`；麥克風與模型音訊走 WebRTC media track，Realtime events 走 `oai-events` data channel。瀏覽器欄位只應填 proxy API key，不得填 OpenAI upstream key。
 
 `結構化日誌 (Structured Logs):`
 
@@ -323,6 +379,7 @@ OPENAI_API_KEY=sk-...
 - `proxy transform warning` / `proxy transform semantic loss`
 - `proxy codex request payload` (Debug 級，脫敏)
 - `proxy upstream error response` / `proxy upstream stream error`
+- `proxy realtime session routed` / `proxy realtime session completed` / `proxy realtime upstream failed`
 
 `Metrics (OTel):`
 

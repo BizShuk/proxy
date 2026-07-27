@@ -30,6 +30,7 @@ type Config struct {
 	APIKeys   []string               `mapstructure:"api-keys"`
 	BodyLimit int                    `mapstructure:"body-limit-mb"`
 	Timeouts  upstream.TimeoutConfig `mapstructure:"timeouts"`
+	Realtime  RealtimeConfig         `mapstructure:"realtime"`
 	Stats     StatsConfig            `mapstructure:"stats"`
 	Cloaking  map[string]any         `mapstructure:"cloaking"`
 }
@@ -41,6 +42,14 @@ type ServerConfig struct {
 
 type StatsConfig struct {
 	Enabled bool `mapstructure:"enabled"`
+}
+
+// RealtimeConfig controls the OpenAI Realtime transport without adding it to
+// the pairwise request/response format matrix.
+type RealtimeConfig struct {
+	Enabled           bool  `mapstructure:"enabled"`
+	MaxConnections    int   `mapstructure:"max-connections"`
+	MaxHandshakeBytes int64 `mapstructure:"max-handshake-bytes"`
 }
 
 // LoadConfig runs gosdk's config.Default (which merges settings.json →
@@ -71,6 +80,9 @@ func setDefaults() {
 	viper.SetDefault("timeouts.messages-ms", 120000)
 	viper.SetDefault("timeouts.stream-messages-ms", 600000)
 	viper.SetDefault("timeouts.count-tokens-ms", 30000)
+	viper.SetDefault("realtime.enabled", true)
+	viper.SetDefault("realtime.max-connections", 32)
+	viper.SetDefault("realtime.max-handshake-bytes", 1<<20)
 	viper.SetDefault("stats.enabled", true)
 }
 
