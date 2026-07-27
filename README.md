@@ -2,7 +2,7 @@
 
 `proxy` 是一個通用的 LLM API 轉譯代理伺服器。它在客戶端 CLI (例如 Claude Code、Codex CLI) 與上游 LLM 提供者 (Anthropic、OpenAI、xAI、Google Gemini、MiniMax、Codex OAuth、Antigravity、Ollama) 之間居中：接收一種協定格式 (Anthropic Messages / OpenAI Chat Completions / OpenAI Responses)、依模型名稱路由到對應上游、把請求翻譯成上游原生協定 (含必要的 header/auth 規範化)、回程再翻譯回客戶端期待的格式 (含 SSE 串流)。
 
-它同時具備**多帳號 OAuth 登入狀態的代理轉發**能力：`auth login --provider X` 寫入的憑證由 `proxy` 在每次請求時讀取、過期自動換發，並依 credentials 自動選擇 api-key 或 OAuth 模式。xAI API key 維持走公開 `api.x.ai`；xAI OAuth 則依 [`xai-org/grok-build`](https://github.com/xai-org/grok-build/tree/b41c75a578f98bddbd326ab02cd53618451d97ee) inference contract 走 `cli-chat-proxy.grok.com`，支援 Responses、Chat Completions、Messages 三種上游協定。
+它同時具備`多帳號 OAuth 登入狀態的代理轉發`能力：`auth login --provider X` 寫入的憑證由 `proxy` 在每次請求時讀取、過期自動換發，並依 credentials 自動選擇 api-key 或 OAuth 模式。xAI API key 的 inference 維持走公開 `api.x.ai`；xAI OAuth inference 則依 [`xai-org/grok-build`](https://github.com/xai-org/grok-build/tree/b41c75a578f98bddbd326ab02cd53618451d97ee) contract 走 `cli-chat-proxy.grok.com`，支援 Responses、Chat Completions、Messages 三種上游協定。Imagine 圖片生成是例外：API key 與 OAuth 都直接走 `api.x.ai/v1/images/generations`。
 
 ---
 
@@ -67,7 +67,7 @@
 `領域流程 (Domain Flow):`
 
 1. 啟動時 `DefaultCatalog()` 載入 7 個 `Profile` (anthropic / minimax / openai-api / openai-codex-oauth / xai / xai-grok-oauth / google)，每個含 endpoint map、auth scheme、header allowlist、`AdvertisedModels`、選填的 `NormalizeRequest`
-2. `Client.do(...)` 依 profile + credential 構造 HTTP request、套用 allowlist 過濾 header、注入 `x-api-key` / `Authorization`、必要時加 `anthropic-version` / Codex headers / Grok OAuth headers
+2. `Client.do(...)` 依 profile + credential 構造 HTTP request、套用 allowlist 過濾 header、注入 `x-api-key` / `Authorization`、必要時加 `anthropic-version` / Codex headers / Grok OAuth headers；`Client.GenerateImage(...)` 則固定把 xAI API key 或 OAuth bearer 送到公開 Imagine API
 3. `Profile.NormalizeRequest(envelope)` 在轉譯完成後執行：例如 `normalizeCodexRequest` 把 `instructions` 從 system/developer 訊息裡 lift 出來、刪除 `max_output_tokens`、強制 `stream: true`；API-key `normalizeXAIRequest` 拒絕非 function 類型 tool；OAuth `normalizeXAIGrokOAuthRequest` 則保留 `x_search` 等 xAI raw tools，並依協定補齊 Grok defaults
 4. `Dispatcher.Lookup(family)` 提供 `/v1/models` 端點的 `AdvertisedModels` 來源
 
@@ -86,12 +86,12 @@
 1. `Server.New(cfg)` 透過 `gin.New()` 構造 engine，依序掛 `Recovery` → `mw.CorrelationID()` → `mw.Helmet()` → `corsLocalhost()`
 2. 從 `cfg.APIKeySet()` 構造 `requireAPIKey` 中介層，掛在 `/v1/*` 與 `/admin/*`；支援 `Authorization: Bearer` 與 `x-api-key` 兩種格式，key 比對採 `subtle.ConstantTimeCompare` 防 timing oracle
 3. 同一 group 上再掛 `rateLimitPerIP` (per-IP 60 req/min 固定窗口)
-4. `router.HealthRouterGroup` / `router.PingRouterGroup` 提供 `/healthz` / `/ping`，自訂 `/health` 與 `/v1/*`、`/admin/*` 由 handler 與 group 註冊
+4. `router.HealthRouterGroup` / `router.PingRouterGroup` 提供 `/healthz` / `/ping`，自訂 `/health` 與 `/v1/*`、`/admin/*` 由 handler 與 group 註冊；`/v1/images/generations` 由獨立 handler 做 OpenAI-compatible JSON pass-through，不進三格式 transform matrix
 5. `NewTransformObserver` 註冊 OTel counters：`agentsdk.proxy.transform.warnings`、`agentsdk.proxy.transform.losses`
 
 `核心實體 (Key Entities):` `Server`, `gin.Engine`, `TransformObserver`, `api-keys`, `rateBucket`
 
-`相關處理器 (Related Handlers):` `handlers/server.go`, `handlers/middleware.go`, `handlers/observability.go`, `cmd/proxy.go`
+`相關處理器 (Related Handlers):` `handlers/server.go`, `handlers/image_generation.go`, `handlers/middleware.go`, `handlers/observability.go`, `cmd/proxy.go`
 
 ---
 
@@ -181,6 +181,7 @@ pm2 start ecosystem.config.js
 | `/v1/responses`               | POST   | OpenAI Responses 介面 (代理至各家上游)               |
 | `/v1/messages`                | POST   | Anthropic Messages 介面                              |
 | `/v1/messages/count_tokens`   | POST   | Anthropic 原生 token count 代理 (若 provider 支援)   |
+| `/v1/images/generations`      | POST   | xAI Imagine 圖片生成；API key / OAuth JSON pass-through |
 | `/admin/accounts`             | GET    | 預留 — `notImplemented`                             |
 | `/admin/stats`                | GET    | 預留 — `notImplemented`                             |
 | `/admin/reload`               | POST   | 預留 — `notImplemented`                             |
@@ -213,6 +214,14 @@ xai-messages/grok-4.5                     → xai (強制走 Messages)
 - OAuth request 固定注入 `X-XAI-Token-Auth: xai-grok-cli`、`x-authenticateresponse: authenticate-response`、`x-grok-client-*` 與 request metadata；`x-grok-model-override` 由實際 routed model 產生，不能由 downstream spoof。
 - OAuth response 的 `x-grok-context-window`、`x-grok-max-completion-tokens`、`x-models-etag`、`x-should-retry` 會在成功與錯誤回應中安全轉送。
 - xAI 登入、token refresh 與持久化仍由 `github.com/bizshuk/auth` 的 `xai_oauth` device flow 負責；本專案實作的是三種 inference wire protocol，不代理 Grok Conversations / Workspaces 產品 API。
+
+`xAI Imagine image generation contract`:
+
+- downstream 呼叫 `POST /v1/images/generations`；必要欄位為 `model` 與 `prompt`，其餘 `n` / `aspect_ratio` / `resolution` / `response_format` 及未知欄位原樣轉送。
+- xAI API key 與 OAuth 都直接呼叫 `https://api.x.ai/v1/images/generations`；OAuth 使用既有 resolver 換發後的 access token 作 Bearer。
+- Imagine OAuth request 不帶 inference-only 的 `X-XAI-Token-Auth`、`x-authenticateresponse` 或 `x-grok-model-override`。
+- upstream status、safe headers 與 JSON body 原樣回傳；若 client 要儲存圖片，應送 `response_format: "b64_json"` 並由 client-side MCP tool 解碼。
+- timeout 對齊 Grok Build：總請求 `300s`、response-header wait `240s`。
 
 `HTTP client 設定範例 (Client Config):`
 

@@ -27,6 +27,21 @@ func TestNewServerWiresGenericHandlerRoutes(t *testing.T) {
 	assert.NotContains(t, response.Body.String(), "not implemented")
 }
 
+func TestNewServerWiresImageGenerationRoute(t *testing.T) {
+	server, err := New(testProxyConfig(t))
+	require.NoError(t, err)
+
+	var found bool
+	for _, route := range server.engine.Routes() {
+		if route.Method == http.MethodPost && route.Path == "/v1/images/generations" {
+			found = true
+			break
+		}
+	}
+
+	assert.True(t, found)
+}
+
 func TestNewServerRejectsInvalidConfiguration(t *testing.T) {
 	cfg := testProxyConfig(t)
 	cfg.BodyLimit = 0

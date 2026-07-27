@@ -131,6 +131,7 @@ func (s *Server) registerRoutes() {
 		v1.POST("/responses", s.handler.Handle(model.FORMAT_OPENAI_RESPONSES))
 		v1.POST("/messages", s.handler.Handle(model.FORMAT_ANTHROPIC_MESSAGES))
 		v1.POST("/messages/count_tokens", s.handler.HandleCountTokens())
+		v1.POST("/images/generations", s.handler.HandleImageGenerations())
 	}
 
 	admin := s.engine.Group("/admin", requireAPIKey(keys))

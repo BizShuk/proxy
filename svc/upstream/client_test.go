@@ -56,6 +56,117 @@ func TestNewClientValidatesDependenciesAndClonesTransport(t *testing.T) {
 	require.True(t, ok)
 	assert.NotSame(t, transport, cloned)
 	assert.Equal(t, time.Duration(validTimeouts.MessagesMs)*time.Millisecond, cloned.ResponseHeaderTimeout)
+	imageCloned, ok := client.imageHTTPClient.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.NotSame(t, cloned, imageCloned)
+	assert.Equal(t, IMAGE_GENERATION_READ_TIMEOUT, imageCloned.ResponseHeaderTimeout)
+}
+
+func TestClientGenerateImageUsesDirectXAIAPIForAPIKeyAndOAuth(t *testing.T) {
+	type recordedRequest struct {
+		path          string
+		authorization string
+		headers       http.Header
+		body          []byte
+	}
+	recorded := make(chan recordedRequest, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		recorded <- recordedRequest{
+			path:          r.URL.Path,
+			authorization: r.Header.Get("Authorization"),
+			headers:       r.Header.Clone(),
+			body:          body,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"b64_json":"aW1hZ2U="}]}`)
+	}))
+	defer server.Close()
+
+	requestBody := []byte(`{
+		"model":"grok-imagine-image-quality",
+		"prompt":"a space cat",
+		"n":1,
+		"aspect_ratio":"auto",
+		"resolution":"1k",
+		"response_format":"b64_json"
+	}`)
+	tests := []struct {
+		name              string
+		profileID         string
+		credential        *authmodel.Credential
+		wantAuthorization string
+	}{
+		{
+			name:      "API key",
+			profileID: "xai",
+			credential: &authmodel.Credential{
+				Provider: "xai", Kind: authmodel.KIND_API_KEY, APIKey: "xai-api-key",
+			},
+			wantAuthorization: "Bearer xai-api-key",
+		},
+		{
+			name:      "OAuth bearer ignores inference base URL",
+			profileID: XAI_GROK_OAUTH_PROFILE_ID,
+			credential: &authmodel.Credential{
+				Provider: "xai", Kind: authmodel.KIND_OAUTH, AccessToken: "xai-oauth-token",
+				BaseURL: XAI_GROK_OAUTH_BASE_URL,
+			},
+			wantAuthorization: "Bearer xai-oauth-token",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := defaultProfile(t, tc.profileID)
+			profile.ImageGenerationBaseURL = server.URL
+			client, err := NewClient(server.Client(), timeoutConfig())
+			require.NoError(t, err)
+
+			response, err := client.GenerateImage(context.Background(), profile, tc.credential, model.RequestEnvelope{
+				Model:   "grok-imagine-image-quality",
+				Headers: http.Header{"x-request-id": {"image-request-1"}},
+				Body:    requestBody,
+			})
+			require.NoError(t, err)
+			responseBody, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			require.NoError(t, response.Body.Close())
+			assert.JSONEq(t, `{"data":[{"b64_json":"aW1hZ2U="}]}`, string(responseBody))
+
+			upstreamRequest := <-recorded
+			assert.Equal(t, "/v1/images/generations", upstreamRequest.path)
+			assert.Equal(t, tc.wantAuthorization, upstreamRequest.authorization)
+			assert.Equal(t, "image-request-1", upstreamRequest.headers.Get("x-request-id"))
+			assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_VERSION, upstreamRequest.headers.Get("x-grok-client-version"))
+			assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, upstreamRequest.headers.Get("x-grok-client-identifier"))
+			assert.Equal(t, xaiGrokUserAgent(), upstreamRequest.headers.Get("User-Agent"))
+			assert.Empty(t, upstreamRequest.headers.Get(XAI_GROK_TOKEN_AUTH_HEADER))
+			assert.Empty(t, upstreamRequest.headers.Get(XAI_GROK_AUTHENTICATE_RESPONSE_HEADER))
+			assert.Empty(t, upstreamRequest.headers.Get("x-grok-model-override"))
+			assert.JSONEq(t, string(requestBody), string(upstreamRequest.body))
+		})
+	}
+}
+
+func TestClientGenerateImageRejectsUnavailableClient(t *testing.T) {
+	profile := defaultProfile(t, "xai")
+	credential := &authmodel.Credential{
+		Provider: "xai", Kind: authmodel.KIND_API_KEY, APIKey: "xai-api-key",
+	}
+
+	var client *Client
+	response, err := client.GenerateImage(context.Background(), profile, credential, model.RequestEnvelope{
+		Model: "grok-imagine-image-quality",
+		Body:  []byte(`{"model":"grok-imagine-image-quality","prompt":"a space cat"}`),
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, response)
+	var proxyErr *model.ProxyError
+	require.ErrorAs(t, err, &proxyErr)
+	assert.Equal(t, model.ERROR_UNAVAILABLE, proxyErr.Kind)
 }
 
 func TestClientDoNeverFollowsRedirects(t *testing.T) {

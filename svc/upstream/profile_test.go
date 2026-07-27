@@ -22,6 +22,8 @@ func TestDefaultCatalogCapabilities(t *testing.T) {
 		preferred                      model.Format
 		baseURL                        string
 		endpoints                      map[model.Format]string
+		imageGenerationBaseURL         string
+		imageGenerationEndpoint        string
 		allowsMissingStreamContentType bool
 	}{
 		{
@@ -55,6 +57,8 @@ func TestDefaultCatalogCapabilities(t *testing.T) {
 				model.FORMAT_OPENAI_RESPONSES: "/v1/responses",
 				model.FORMAT_OPENAI_CHAT:      "/v1/chat/completions",
 			},
+			imageGenerationBaseURL:  "https://api.x.ai",
+			imageGenerationEndpoint: "/v1/images/generations",
 		},
 		{
 			id: "xai-grok-oauth", preferred: model.FORMAT_OPENAI_RESPONSES,
@@ -64,6 +68,8 @@ func TestDefaultCatalogCapabilities(t *testing.T) {
 				model.FORMAT_OPENAI_CHAT:        "/chat/completions",
 				model.FORMAT_ANTHROPIC_MESSAGES: "/messages",
 			},
+			imageGenerationBaseURL:  "https://api.x.ai",
+			imageGenerationEndpoint: "/v1/images/generations",
 		},
 	}
 	for _, tc := range tests {
@@ -74,6 +80,8 @@ func TestDefaultCatalogCapabilities(t *testing.T) {
 			assert.Equal(t, tc.preferred, profile.Preferred)
 			assert.Equal(t, tc.baseURL, profile.BaseURL)
 			assert.Equal(t, tc.endpoints, profile.Endpoints)
+			assert.Equal(t, tc.imageGenerationBaseURL, profile.ImageGenerationBaseURL)
+			assert.Equal(t, tc.imageGenerationEndpoint, profile.ImageGenerationEndpoint)
 			assert.Equal(t, tc.allowsMissingStreamContentType, profile.AllowsMissingStreamContentType)
 		})
 	}

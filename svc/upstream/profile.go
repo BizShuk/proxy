@@ -71,6 +71,8 @@ type Profile struct {
 	CredentialProvider             string
 	BaseURL                        string
 	Endpoints                      map[model.Format]string
+	ImageGenerationBaseURL         string
+	ImageGenerationEndpoint        string
 	Preferred                      model.Format
 	AuthScheme                     AuthScheme
 	AllowedRequestHeaders          []string
@@ -298,10 +300,12 @@ func DefaultCatalog() (*Catalog, error) {
 			NormalizeRequest:               normalizeCodexRequest,
 		},
 		{
-			ID:                 "xai",
-			Routing:            xaiRouting,
-			CredentialProvider: "xai",
-			BaseURL:            "https://api.x.ai",
+			ID:                      "xai",
+			Routing:                 xaiRouting,
+			CredentialProvider:      "xai",
+			BaseURL:                 "https://api.x.ai",
+			ImageGenerationBaseURL:  "https://api.x.ai",
+			ImageGenerationEndpoint: "/v1/images/generations",
 			Endpoints: map[model.Format]string{
 				model.FORMAT_OPENAI_RESPONSES: "/v1/responses",
 				model.FORMAT_OPENAI_CHAT:      "/v1/chat/completions",
@@ -314,10 +318,12 @@ func DefaultCatalog() (*Catalog, error) {
 			NormalizeRequest:       normalizeXAIRequest,
 		},
 		{
-			ID:                 XAI_GROK_OAUTH_PROFILE_ID,
-			Routing:            xaiRouting,
-			CredentialProvider: "xai",
-			BaseURL:            XAI_GROK_OAUTH_BASE_URL,
+			ID:                      XAI_GROK_OAUTH_PROFILE_ID,
+			Routing:                 xaiRouting,
+			CredentialProvider:      "xai",
+			BaseURL:                 XAI_GROK_OAUTH_BASE_URL,
+			ImageGenerationBaseURL:  "https://api.x.ai",
+			ImageGenerationEndpoint: "/v1/images/generations",
 			Endpoints: map[model.Format]string{
 				model.FORMAT_OPENAI_RESPONSES:   "/responses",
 				model.FORMAT_OPENAI_CHAT:        "/chat/completions",

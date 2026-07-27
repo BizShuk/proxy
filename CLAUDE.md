@@ -16,6 +16,7 @@ proxy/
 ├── handlers/                     # gin engine + 全部 HTTP 表面
 │   ├── server.go                 # Server.New: 組 engine + middleware + 路由表
 │   ├── handler.go                # Handler.Handle / HandleModels / HandleCountTokens
+│   ├── image_generation.go       # /v1/images/generations xAI JSON pass-through
 │   ├── middleware.go             # requireAPIKey / corsLocalhost / rateLimitPerIP
 │   ├── observability.go          # TransformObserver (OTel counters + slog)
 │   ├── codex_log.go              # Codex OAuth 請求脫敏 metadata log
@@ -49,7 +50,7 @@ proxy/
 │       ├── dispatcher_default.go # NewDefaultDispatcher (env-var driven)
 │       ├── dispatcher_oauth.go   # BuildProvider / NewDispatcherWithAuth[AndEnv]
 │       ├── credential.go         # CredentialResolver (包 auth/svc.Resolver)
-│       ├── client.go             # Client.Do / CountTokens + header/secret 套用
+│       ├── client.go             # Client.Do / CountTokens / GenerateImage + header/secret 套用
 │       └── config.go             # TimeoutConfig
 └── docs/
     ├── plans/                    # 進行中計畫
@@ -81,9 +82,11 @@ proxy/
 - `MAX_UPSTREAM_ERROR_BYTES = 64<<10`：日誌最多印 64 KiB 上游錯誤 body；超出部分以 `body_truncated: true` 標記 + `body_bytes` 計數。
 - `sensitiveHeaders` deny-list：`authorization` / `proxy-authorization` / `cookie` / `set-cookie` / `x-api-key` / `api-key` / `x-auth-token` / `x-amz-security-token` 等 8 個 key 永不寫進日誌。
 - Codex OAuth payload 脫敏：只印 `model` / `stream` / `store` / `instructions_bytes` / `has_instructions` / `input_roles` / `tool_names` / `parallel_tool_calls`，原始 `instructions` 與 `input[].content` 絕不進 slog。
-- xAI credential kind 決定具體 profile：API key 選 `xai` (`https://api.x.ai`)，OAuth 選 `xai-grok-oauth` (`https://cli-chat-proxy.grok.com/v1`)；兩者共享 `xai` routing family，不能讓 OAuth token 誤送公開 API。
+- xAI credential kind 決定 inference profile：API key 選 `xai` (`https://api.x.ai`)，OAuth 選 `xai-grok-oauth` (`https://cli-chat-proxy.grok.com/v1`)；兩者共享 `xai` routing family，OAuth token 不得誤送公開 inference API。
 - `xai-grok-oauth` 對齊 `grok-build` 的三種 inference protocol：`/responses`、`/chat/completions`、`/messages`。`xai-responses` / `xai-chat` / `xai-messages` qualifier 強制 target format；無 format qualifier 時偏好 Responses。
 - Grok OAuth request 固定由 `Client.do` 注入 bearer、`X-XAI-Token-Auth`、`x-authenticateresponse`、`x-grok-client-*` 與 request metadata；downstream 只能傳 conversation/session/turn/agent/deployment tracking 欄位，不能覆寫 auth、client identity、routed model 或 credential user identity。
+- Imagine 不屬於 inference profile：`Client.GenerateImage` 對 API key 與 OAuth 一律直連 `https://api.x.ai/v1/images/generations`，OAuth bearer 具 `api:access` scope；不得注入 `cli-chat-proxy` 專用 headers。request/response JSON 不進 `model.Format` 或 transform matrix。
+- image generation 使用獨立 HTTP client，總 timeout `300s`、response-header timeout `240s`，避免 Imagine 在 server-side buffer 圖片期間被一般 messages timeout 切斷。
 - Grok response metadata (`x-grok-context-window` / `x-grok-max-completion-tokens` / `x-models-etag` / `x-should-retry`) 列入 profile allowlist；成功走 `copySafeResponseHeaders`，4xx/5xx 走會移除 upstream content type 的 `copySafeErrorResponseHeaders`。
 - `normalizeXAIGrokOAuthRequest` 保留 xAI-specific raw tools；Responses 預設 `store:false` + `reasoning.encrypted_content`，streaming Chat 合併 `stream_options.include_usage:true`，Messages 缺少 `max_tokens` 時用 `128000`。
 - Anthropic `thinking` 與 Responses typed `reasoning` 必須對稱：`id` / `summary` / `encrypted_content` 以版本化 `thinking.signature` 保存，SSE 在 reasoning item 完成時送 `signature_delta`；非本 proxy 產生的 Anthropic signature 只記 semantic loss，不冒充 Responses encrypted state。
@@ -100,6 +103,7 @@ proxy/
 | 上游調度 (Upstream Dispatch)                | `svc/upstream` (`Profile` / `Catalog` / `Dispatcher` / `Client`)                                | `DefaultCatalog()` + `Client.Do`                            |
 | HTTP 公開介面 (HTTP Surface)                | `handlers` (`Server` / `middleware` / `observability`)                                          | `Server.New(cfg).Run(ctx)`                                  |
 | 請求生命週期 (Request Lifecycle)            | `handlers/handler.go`, `handlers/codex_log.go`, `handlers/upstream_error_log.go`                | `Handler.Handle(format)`, `Handler.HandleModels`            |
+| 圖片生成 (Image Generation)                 | `handlers/image_generation.go`, `svc/upstream/client.go`, `svc/upstream/profile.go`             | `Handler.HandleImageGenerations` → `Client.GenerateImage`   |
 | 設定與生命週期 (Config & Lifecycle)         | `config`, `cmd`, `main`, `ecosystem.config.js`                                                  | `cmd.ProxyCmd.RunE`                                         |
 
 ## 觀測鏈 (Observability Chain)
@@ -146,7 +150,7 @@ go build ./...
 go test ./...
 ```
 
-(整個專案大量使用 `_test.go`：handlers/ 有 5 個、svc/transform/ 有 14 個、svc/route 有 1 個、svc/upstream 有 6 個、model 有 4 個。)
+(整個專案大量使用 `_test.go`：handlers/ 有 10 個、svc/transform/ 有 13 個、svc/route 有 1 個、svc/upstream 有 5 個、model 有 5 個。)
 
 ### 部署 (Deploy)
 

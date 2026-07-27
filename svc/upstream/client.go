@@ -17,9 +17,17 @@ import (
 	"github.com/bizshuk/proxy/model"
 )
 
+const (
+	// IMAGE_GENERATION_TIMEOUT matches Grok Build's total Imagine request timeout.
+	IMAGE_GENERATION_TIMEOUT = 300 * time.Second
+	// IMAGE_GENERATION_READ_TIMEOUT allows buffered image generation to wait for response headers.
+	IMAGE_GENERATION_READ_TIMEOUT = 240 * time.Second
+)
+
 // Client sends sanitized, context-bound requests to concrete provider profiles.
 type Client struct {
 	httpClient         *http.Client
+	imageHTTPClient    *http.Client
 	messagesTimeout    time.Duration
 	streamTimeout      time.Duration
 	countTokensTimeout time.Duration
@@ -45,6 +53,7 @@ func NewClient(httpClient *http.Client, cfg TimeoutConfig) (*Client, error) {
 	clone.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
+	imageClone := clone
 	transport := clone.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
@@ -53,12 +62,17 @@ func NewClient(httpClient *http.Client, cfg TimeoutConfig) (*Client, error) {
 		transportClone := source.Clone()
 		transportClone.ResponseHeaderTimeout = time.Duration(cfg.MessagesMs) * time.Millisecond
 		clone.Transport = transportClone
+		imageTransportClone := source.Clone()
+		imageTransportClone.ResponseHeaderTimeout = IMAGE_GENERATION_READ_TIMEOUT
+		imageClone.Transport = imageTransportClone
 	} else {
 		clone.Transport = transport
+		imageClone.Transport = transport
 	}
 
 	return &Client{
 		httpClient:         &clone,
+		imageHTTPClient:    &imageClone,
 		messagesTimeout:    time.Duration(cfg.MessagesMs) * time.Millisecond,
 		streamTimeout:      time.Duration(cfg.StreamMessagesMs) * time.Millisecond,
 		countTokensTimeout: time.Duration(cfg.CountTokensMs) * time.Millisecond,
@@ -91,6 +105,52 @@ func (c *Client) CountTokens(ctx context.Context, profile Profile, cred *authmod
 	return c.do(ctx, profile, cred, envelope, profile.CountTokensEndpoint, c.countTokensTimeout, false)
 }
 
+// GenerateImage sends an OpenAI-compatible image-generation request directly
+// to xAI's public API. OAuth credentials intentionally bypass the Grok
+// inference proxy because Grok Build uses api.x.ai for Imagine with both
+// credential kinds.
+func (c *Client) GenerateImage(
+	ctx context.Context,
+	profile Profile,
+	cred *authmodel.Credential,
+	envelope model.RequestEnvelope,
+) (*http.Response, error) {
+	if strings.TrimSpace(profile.ImageGenerationBaseURL) == "" ||
+		strings.TrimSpace(profile.ImageGenerationEndpoint) == "" {
+		return nil, &model.ProxyError{
+			Kind:    model.ERROR_UNSUPPORTED_FEATURE,
+			Status:  http.StatusNotImplemented,
+			Code:    "image_generation_unsupported",
+			Message: fmt.Sprintf("profile %q does not support image generation", profile.ID),
+		}
+	}
+	if err := validateCredentialForProfile(profile, cred); err != nil {
+		return nil, err
+	}
+
+	imageProfile := profile
+	imageProfile.BaseURL = profile.ImageGenerationBaseURL
+	imageCredential := *cred
+	if imageCredential.Kind == authmodel.KIND_OAUTH {
+		imageCredential.BaseURL = ""
+	}
+	var imageHTTPClient *http.Client
+	if c != nil {
+		imageHTTPClient = c.imageHTTPClient
+	}
+	return c.doWithHTTPClient(
+		imageHTTPClient,
+		ctx,
+		imageProfile,
+		&imageCredential,
+		envelope,
+		profile.ImageGenerationEndpoint,
+		IMAGE_GENERATION_TIMEOUT,
+		false,
+		true,
+	)
+}
+
 func (c *Client) do(
 	ctx context.Context,
 	profile Profile,
@@ -100,7 +160,25 @@ func (c *Client) do(
 	timeout time.Duration,
 	stream bool,
 ) (*http.Response, error) {
-	if c == nil || c.httpClient == nil {
+	var httpClient *http.Client
+	if c != nil {
+		httpClient = c.httpClient
+	}
+	return c.doWithHTTPClient(httpClient, ctx, profile, cred, envelope, endpoint, timeout, stream, false)
+}
+
+func (c *Client) doWithHTTPClient(
+	httpClient *http.Client,
+	ctx context.Context,
+	profile Profile,
+	cred *authmodel.Credential,
+	envelope model.RequestEnvelope,
+	endpoint string,
+	timeout time.Duration,
+	stream bool,
+	imageGeneration bool,
+) (*http.Response, error) {
+	if c == nil || httpClient == nil {
 		return nil, unavailableUpstreamError("upstream HTTP client is unavailable", nil)
 	}
 	if ctx == nil {
@@ -131,15 +209,25 @@ func (c *Client) do(
 	}
 	forwardAllowlistedHeaders(profile, envelope.Headers, request.Header)
 	applyProviderHeaders(profile, cred, request.Header)
-	applyXAIGrokOAuthHeaders(profile, cred, envelope, request.Header)
+	if imageGeneration {
+		applyXAIImageHeaders(request.Header)
+	} else {
+		applyXAIGrokOAuthHeaders(profile, cred, envelope, request.Header)
+	}
 
-	response, err := c.httpClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		cancel()
 		return nil, transportProxyError(err)
 	}
 	response.Body = &cancelReadCloser{ReadCloser: response.Body, cancel: cancel}
 	return response, nil
+}
+
+func applyXAIImageHeaders(header http.Header) {
+	header.Set("x-grok-client-version", DEFAULT_XAI_GROK_CLIENT_VERSION)
+	header.Set("x-grok-client-identifier", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER)
+	header.Set("User-Agent", xaiGrokUserAgent())
 }
 
 func buildEndpointURL(baseURL, endpoint string) (string, error) {
