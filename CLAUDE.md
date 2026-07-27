@@ -56,9 +56,9 @@ proxy/
 │   │   └── chat_responses_{request,response,stream}.go
 │   └── upstream/                 # 上游 profile + dispatcher + transport
 │       ├── profile.go            # Profile / Catalog / DefaultCatalog + normalize*
-│       ├── dispatcher.go         # Dispatcher (live core.Provider 集合)
-│       ├── dispatcher_default.go # NewDefaultDispatcher (env-var driven)
-│       ├── dispatcher_oauth.go   # BuildProvider / NewDispatcherWithAuth[AndEnv]
+│       ├── dispatcher.go         # Dispatcher (live provider.Adapter 集合，key 為 agentsdk registry name)
+│       ├── dispatcher_default.go # NewDefaultDispatcher (走 provider.Names() + env-var)
+│       ├── dispatcher_oauth.go   # NewDispatcherWithAuth[AndEnv] (走 agentsdk credential.Source)
 │       ├── credential.go         # CredentialResolver (包 auth/svc.Resolver)
 │       ├── client.go             # Client.Do / CountTokens / GenerateImage + header/secret 套用
 │       └── config.go             # TimeoutConfig
@@ -106,7 +106,9 @@ proxy/
 - `normalizeXAIGrokOAuthRequest` 保留 xAI-specific raw tools；Responses 預設 `store:false` + `reasoning.encrypted_content`，streaming Chat 合併 `stream_options.include_usage:true`，Messages 缺少 `max_tokens` 時用 `128000`。
 - Anthropic `thinking` 與 Responses typed `reasoning` 必須對稱：`id` / `summary` / `encrypted_content` 以版本化 `thinking.signature` 保存，SSE 在 reasoning item 完成時送 `signature_delta`；非本 proxy 產生的 Anthropic signature 只記 semantic loss，不冒充 Responses encrypted state。
 - `SSEDecoder` 只在 stream 開頭移除 UTF-8 BOM；這是 Grok 三種 streaming endpoint 的共同相容需求，不放進個別 transform。
-- auth storage provider ID 是 `xai`，Agents SDK provider ID 是 `grok`；`BuildProvider` 負責這個邊界映射，`familiesInDefaultOrder` 必須向 resolver 查 `xai`。
+- auth storage provider ID 與 Agents SDK provider ID 不同名 (`xai` vs `grok`、`openai` vs `codex`)，這個邊界映射由 agentsdk 的 `provider/credential` 擁有 (`credential.RouteID` / `credential.Names`)，proxy 不再自備路由表。舊碼的 `familiesInDefaultOrder` 直接向 resolver 查 `codex`，但 auth 從不以該名存憑證，故 codex 憑證實際上永遠只能從 env fallback 進來；改用 `credential.Names()` 後修正。
+- `core.Provider` 是純能力介面 (`Generate` / `Stream`)，不帶 `ID()` / `Models()`：名字屬於索引 adapter 的 registry，不屬於 adapter 自身。因此 `Dispatcher.Set(name, adapter)` 由呼叫端給名，`AdvertisedModels` 走 `provider.Catalog(name)`（免憑證、免 I/O）。
+- 憑證不再於建構時快照：`credential.Source.Decorator()` 每次呼叫重新向 auth store 解析，token 輪替不需 `Dispatcher.Replace`。startup 仍探測一次，讓沒有憑證的 family 不出現在 `/v1/models`。
 
 ## 模組對應 (Module Mapping)
 
@@ -114,7 +116,7 @@ proxy/
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | 協定轉譯 (Protocol Translation)             | `svc/transform`, `model/anthropic`, `model/chat`, `model/responses`                             | `transform.NewDefaultRegistry()` → `Registry.Lookup`        |
 | 模型路由 (Model Routing)                    | `svc/route`, `svc/upstream` (`ResolveProfile` / `NewRouter`)                                    | `Router.Resolve(format, modelName)`                         |
-| 憑證解析 (Credential Resolution)            | `svc/upstream` (`CredentialResolver`), `bizshuk/auth/svc`, `bizshuk/auth/provider`              | `CredentialResolver.Resolve` → `BuildProvider`              |
+| 憑證解析 (Credential Resolution)            | `svc/upstream` (`CredentialResolver`), `agentsdk/provider/credential`, `bizshuk/auth/svc`       | `CredentialResolver.Resolve` (request path) / `credential.NewAutoSource` (wiring) |
 | 上游調度 (Upstream Dispatch)                | `svc/upstream` (`Profile` / `Catalog` / `Dispatcher` / `Client`)                                | `DefaultCatalog()` + `Client.Do`                            |
 | HTTP 公開介面 (HTTP Surface)                | `handlers` (`Server` / `middleware` / `observability`)                                          | `Server.New(cfg).Run(ctx)`                                  |
 | 請求生命週期 (Request Lifecycle)            | `handlers/handler.go`, `handlers/codex_log.go`, `handlers/upstream_error_log.go`                | `Handler.Handle(format)`, `Handler.HandleModels`            |

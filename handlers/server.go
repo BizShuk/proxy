@@ -80,12 +80,18 @@ func New(cfg *pxconfig.Config) (*Server, error) {
 	}
 	// Phase C: wire the agentsdk provider dispatcher alongside the
 	// legacy Profile/Catalog. The dispatcher carries the live
-	// core.Provider instances (anthropic / ollama / grok / antigravity /
-	// codex / minimax) so /v1/models can serve their static catalogs.
+	// provider.Adapter instances (anthropic / ollama / grok /
+	// antigravity / codex / minimax / google) so /v1/models can serve
+	// their bundled catalogs.
+	//
+	// The store — not the proxy's resolver — is what goes in: agentsdk's
+	// credential package builds its own resolver per family, keyed by the
+	// auth route it owns the mapping for. The proxy's CredentialResolver
+	// stays on the request path, where its job is error-surface mapping.
 	//
 	// Prefer auth-store credentials (OAuth login + API keys), falling
 	// back to env vars for any family without a stored credential.
-	dispatcher, err := upstream.NewDispatcherWithAuthAndEnv(credentials.AsInner())
+	dispatcher, err := upstream.NewDispatcherWithAuthAndEnv(store)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server dispatcher: %w", err)
 	}

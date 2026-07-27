@@ -9,34 +9,51 @@ import (
 	"testing"
 
 	"github.com/bizshuk/agentsdk/core"
+	"github.com/bizshuk/agentsdk/provider"
 	"github.com/bizshuk/proxy/svc/upstream"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// fakeProvider satisfies core.Provider for the dispatcher integration test.
-type fakeProvider struct {
-	idVal  string
-	models []core.ModelSpec
-}
+// fakeAdapter satisfies provider.Adapter for the dispatcher integration
+// test. The adapter contract is capability-only (Generate + Stream);
+// identity and catalog come from the agentsdk registry, so this stub
+// deliberately carries neither.
+type fakeAdapter struct{}
 
-func (f *fakeProvider) ID() string               { return f.idVal }
-func (f *fakeProvider) Models() []core.ModelSpec { return f.models }
-func (f *fakeProvider) AuthSchemes() []string    { return []string{"api_key"} }
-func (f *fakeProvider) Generate(ctx context.Context, req core.ModelRequest) (core.ModelResult, error) {
+func (f *fakeAdapter) Generate(ctx context.Context, req core.ModelRequest) (core.ModelResult, error) {
 	return core.ModelResult{}, nil
 }
-func (f *fakeProvider) Stream(ctx context.Context, req core.ModelRequest) (<-chan core.ModelChunk, error) {
+func (f *fakeAdapter) Stream(ctx context.Context, req core.ModelRequest) (<-chan core.ModelChunk, error) {
 	ch := make(chan core.ModelChunk)
 	close(ch)
 	return ch, nil
 }
-func (f *fakeProvider) CountTokens(ctx context.Context, msgs []core.Message) (int, error) {
-	return 0, nil
-}
 
-var _ core.Provider = (*fakeProvider)(nil)
+var _ provider.Adapter = (*fakeAdapter)(nil)
+
+// catalogIDs is the model-id set agentsdk bundles for a family — the
+// same source /v1/models reads through the dispatcher.
+func catalogIDs(t *testing.T, names ...string) []string {
+	t.Helper()
+	seen := make(map[string]struct{})
+	var out []string
+	for _, name := range names {
+		specs, ok := provider.Catalog(name)
+		require.Truef(t, ok, "provider %q must be registered", name)
+		require.NotEmptyf(t, specs, "provider %q must bundle a catalog", name)
+		for _, s := range specs {
+			if _, dup := seen[s.ID]; dup {
+				continue
+			}
+			seen[s.ID] = struct{}{}
+			out = append(out, s.ID)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 
 func TestHandleModelsFallsBackToCatalogWhenNoDispatcher(t *testing.T) {
 	// Existing test path: no Dispatcher wired → falls back to catalog
@@ -52,7 +69,6 @@ func TestHandleModelsFallsBackToCatalogWhenNoDispatcher(t *testing.T) {
 	r.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/models", nil))
 
 	require.Equal(t, http.StatusOK, resp.Code)
-	// Should have at least one model id (catalog returns prefixes/IDs).
 	var payload struct {
 		Data []struct {
 			ID string `json:"id"`
@@ -63,19 +79,11 @@ func TestHandleModelsFallsBackToCatalogWhenNoDispatcher(t *testing.T) {
 }
 
 func TestHandleModelsUsesDispatcherWhenWired(t *testing.T) {
-	// New path: Dispatcher is wired → /v1/models serves the union of
-	// the provider catalogs.
-	d, err := upstream.NewDispatcherFromProviders(
-		&fakeProvider{idVal: "anthropic", models: []core.ModelSpec{
-			{ID: "claude-opus-4-8"},
-			{ID: "claude-sonnet-5"},
-		}},
-		&fakeProvider{idVal: "ollama", models: []core.ModelSpec{
-			{ID: "llama3.2"},
-			{ID: "claude-opus-4-8"}, // duplicate id across providers — must dedup
-		}},
-	)
-	require.NoError(t, err)
+	// Dispatcher is wired → /v1/models serves the union of the registry
+	// catalogs for the registered families, deduplicated.
+	d := upstream.NewDispatcher()
+	require.NoError(t, d.Set("anthropic", &fakeAdapter{}))
+	require.NoError(t, d.Set("ollama", &fakeAdapter{}))
 
 	deps := newHandlerDeps(t, nil)
 	deps.Dispatcher = d
@@ -101,18 +109,25 @@ func TestHandleModelsUsesDispatcherWhenWired(t *testing.T) {
 		ids = append(ids, item.ID)
 	}
 	sort.Strings(ids)
-	assert.Equal(t, []string{"claude-opus-4-8", "claude-sonnet-5", "llama3.2"}, ids,
-		"dispatcher must dedup cross-provider model ids")
+	assert.Equal(t, catalogIDs(t, "anthropic", "ollama"), ids,
+		"dispatcher must serve the registry catalogs, deduped across families")
 }
 
-func TestDispatcherLookupReturnsCoreProviderInterface(t *testing.T) {
+func TestDispatcherLookupReturnsProviderAdapter(t *testing.T) {
 	d := upstream.NewDispatcher()
-	fp := &fakeProvider{idVal: "anthropic", models: []core.ModelSpec{{ID: "claude-opus-4-8"}}}
-	require.NoError(t, d.Set(fp))
+	fa := &fakeAdapter{}
+	require.NoError(t, d.Set("anthropic", fa))
 
 	got, ok := d.Lookup("anthropic")
 	require.True(t, ok)
-	assert.Equal(t, "anthropic", got.ID())
-	assert.Equal(t, []string{"api_key"}, got.AuthSchemes())
-	assert.Len(t, got.Models(), 1)
+	assert.Same(t, fa, got)
+
+	// Generate/Stream are the whole contract now — assert the adapter is
+	// usable through the interface the dispatcher hands back.
+	_, err := got.Generate(context.Background(), core.ModelRequest{})
+	require.NoError(t, err)
+	ch, err := got.Stream(context.Background(), core.ModelRequest{})
+	require.NoError(t, err)
+	_, open := <-ch
+	assert.False(t, open)
 }
