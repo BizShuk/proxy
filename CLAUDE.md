@@ -75,7 +75,7 @@ proxy/
 - CLI: `github.com/spf13/cobra` v1.10.2 + `github.com/spf13/viper` v1.20.1
 - Config / logging / middleware: `github.com/bizshuk/gosdk` v1.2.5
 - Auth: `github.com/bizshuk/auth` v0.0.0-20260718180648-a05ed97812a8 (FileStore + svc.Resolver + provider.For)
-- Provider SDK: `github.com/bizshuk/agentsdk` v0.0.0-20260720171156-c4107072037b (core + provider/* via dispatcher)
+- Provider SDK: `github.com/bizshuk/agentsdk` v0.0.15 (core + provider/* via dispatcher)
 - MCP SDK: `github.com/modelcontextprotocol/go-sdk` v1.6.0
 - Observability: `log/slog` (stdlib) + `go.opentelemetry.io/otel` v1.44.0
 - Test: `github.com/stretchr/testify` v1.11.1
