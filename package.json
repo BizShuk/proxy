@@ -1,0 +1,10 @@
+{
+  "name": "proxy",
+  "private": true,
+  "scripts": {
+    "build": "go build ./...",
+    "test": "go test ./... -count=1 -timeout=180s",
+    "vet": "go vet ./...",
+    "verify": "npm run test && npm run build && npm run vet"
+  }
+}

@@ -6,6 +6,7 @@
 proxy/
 ├── main.go                       # cobra entry; 載 gosdk/log、執行 ProxyCmd
 ├── go.mod / go.sum               # module github.com/bizshuk/proxy (go 1.26.0)
+├── package.json                  # npm scripts 統一執行 Go build/test/vet/verify
 ├── ecosystem.config.js           # pm2 部署 (namespace: Service)
 ├── settings.example.json         # 範例設定 (host/port/auth-dir/api-keys/timeouts/...)
 ├── scripts/                      # *.http 範例 + realtime-webrtc.html browser client
@@ -153,6 +154,7 @@ proxy/
 ### 前置需求 (Prerequisites)
 
 - Go 1.26.0
+- Node.js / npm（只作為統一開發命令入口，無 runtime dependency）
 - 已安裝 `bizshuk/gosdk`、`bizshuk/auth`、`bizshuk/agentsdk` (透過 go.mod 自動取得)
 - 本機預期有 `~/.config/agentSDK/settings.local.json` (首次跑 `proxy config init` 會建立)
 
@@ -165,16 +167,25 @@ go mod download
 ### 建置 (Build)
 
 ```bash
-go build ./...
+npm run build
 ```
 
 ### 測試 (Test)
 
 ```bash
-go test ./...
+npm test
 ```
 
 (整個專案大量使用 `_test.go`：handlers/ 有 10 個、svc/transform/ 有 13 個、svc/route 有 1 個、svc/upstream 有 5 個、model 有 5 個、mcpimage/ 有 5 個。)
+
+### 靜態檢查與完整驗證 (Static Analysis and Verification)
+
+```bash
+npm run vet
+npm run verify
+```
+
+`npm run verify` 依序執行完整 Go test、build 與 vet；實際 Go 命令集中定義於 `package.json`。
 
 ### 部署 (Deploy)
 
