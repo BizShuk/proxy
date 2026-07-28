@@ -134,7 +134,6 @@
 
 ---
 
-<<<<<<< Updated upstream
 ### 8. 圖片生成 MCP 接入 (Image Generation MCP Integration)
 
 以同一個 `stdio MCP` server 接入 Codex 與 Claude Code，不要求兩套 client 各自實作 xAI wire protocol。
@@ -149,8 +148,10 @@
 `核心實體 (Key Entities):` `mcpimage.Config`, `ProxyClient`, `Generator`, `generate_image`
 
 `相關處理器 (Related Handlers):` `mcpimage/config.go`, `mcpimage/client.go`, `mcpimage/tool.go`, `mcpimage/server.go`, `cmd/image_mcp.go`, `plugins/proxy-imagegen`
-=======
-### 8. GPT 即時語音 (GPT Realtime Voice)
+
+---
+
+### 9. GPT 即時語音 (GPT Realtime Voice)
 
 Realtime 語音不是第四種 request/response format，而是持續存在的雙向 session transport。proxy 保留 OpenAI GA Realtime event schema，不讓它進入既有 pairwise transform matrix。
 
@@ -169,7 +170,6 @@ Realtime 語音不是第四種 request/response format，而是持續存在的�
 完整協定、failure semantics 與驗收證據：
 
 📄 [`docs/plans/2026-07-26-gpt-realtime-voice-proxy.md`](docs/plans/2026-07-26-gpt-realtime-voice-proxy.md)
->>>>>>> Stashed changes
 
 ---
 
@@ -177,38 +177,28 @@ Realtime 語音不是第四種 request/response format，而是持續存在的�
 
 ```mermaid
 flowchart LR
-<<<<<<< Updated upstream
     Agent["Codex / Claude Code"] -->|"MCP stdio"| ImageMCP["圖片 MCP 接入 (#8)"]
     ImageMCP -->|"POST /v1/images/generations"| HTTP["HTTP 表面 (#5)"]
     HTTP -->|"route"| Lifecycle["請求生命週期 (#6)"]
-=======
-    HTTP["HTTP 表面 (#5)"] -->|"route"| Lifecycle["請求生命週期 (#6)"]
->>>>>>> Stashed changes
     Lifecycle -->|"Resolve model"| Routing["模型路由 (#2)"]
     Lifecycle -->|"Resolve credential"| Cred["憑證解析 (#3)"]
     Lifecycle -->|"Pair.Request / Response"| Trans["協定轉譯 (#1)"]
     Lifecycle -->|"NormalizeRequest + Do"| Upstream["上游調度 (#4)"]
-<<<<<<< Updated upstream
-    Cred -->|"BuildProvider"| Upstream
-    Config["設定 (#7)"] -->|"HTTP server"| HTTP
-    Config -->|"MCP client"| ImageMCP
-    Config --> Upstream
-    Trans -.->|"讀"| Lifecycle
-=======
-    Realtime["GPT Realtime (#8)"] -->|"native event tunnel"| Upstream
+    Realtime["GPT Realtime (#9)"] -->|"native event tunnel"| Upstream
     Realtime -->|"Resolve OpenAI API key"| Cred
     HTTP -->|"upgrade / handshake"| Realtime
     Cred -->|"BuildProvider"| Upstream
-    Config["設定 (#7)"] -->|"bootstrap"| HTTP
-    Config -->|"timeout / limits"| Upstream
-    Trans -.讀.-> Lifecycle
->>>>>>> Stashed changes
+    Config["設定 (#7)"] -->|"HTTP server"| HTTP
+    Config -->|"MCP client"| ImageMCP
+    Config -->|"Realtime limits"| Realtime
+    Config --> Upstream
+    Trans -.->|"讀"| Lifecycle
 ```
 
 - (#2) 路由的輸出是 (#4) 選 `Profile` 的輸入；二者共享 `route.Profile` 這個宣告結構。
 - (#3) 解析出的 credential 同時被 (#4) 用來構造 request header，也被 (#4) dispatcher 拿來建 `core.Provider`。
 - (#1) 與 (#4) 並無直接耦合：trans 層只讀 `model.Format`，upstream 層只讀 `Profile` 與 `Format`，handler 在中間把它們接起來。
-- (#7) 設定只在啟動時影響 (#5) 與 (#4)；運行期無熱重載。
+- (#7) 設定只在啟動時影響 (#4)、(#5)、(#8) 與 (#9)；運行期無熱重載。
 
 ---
 
@@ -249,13 +239,10 @@ Codex 會先列出 `gpt-5`、`gpt-5-mini`、`gpt-5.6-sol`、`gpt-5.6-terra`、`g
 | `/v1/responses`               | POST   | OpenAI Responses 介面 (代理至各家上游)               |
 | `/v1/messages`                | POST   | Anthropic Messages 介面                              |
 | `/v1/messages/count_tokens`   | POST   | Anthropic 原生 token count 代理 (若 provider 支援)   |
-<<<<<<< Updated upstream
 | `/v1/images/generations`      | POST   | OpenAI `gpt-image-*` / xAI Imagine 圖片生成；JSON pass-through |
-=======
 | `/v1/realtime?model=...`      | GET    | OpenAI Realtime WebSocket event/audio tunnel          |
 | `/v1/realtime/calls`          | POST   | WebRTC unified-interface SDP/session 建立             |
 | `/v1/realtime/client_secrets` | POST   | 建立瀏覽器/行動端使用的短效 Realtime credential      |
->>>>>>> Stashed changes
 | `/admin/accounts`             | GET    | 預留 — `notImplemented`                             |
 | `/admin/stats`                | GET    | 預留 — `notImplemented`                             |
 | `/admin/reload`               | POST   | 預留 — `notImplemented`                             |

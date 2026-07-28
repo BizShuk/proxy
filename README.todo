@@ -24,8 +24,9 @@
 
 ## agentsdk Component Handover
 
-- [ ] 提案把 `model/sse.go` 上移為 agentsdk 共用 SSE primitive — agentsdk 六份 stream parser 各自手刻掃描（`scanner.Buffer(64*1024, 1024*1024)` 複製六次），且全部沒有 BOM 處理，Grok streaming 需要
-- [ ] 請 agentsdk 評估公開 `provider/internal/openaichat`（`EncodeRequest` / `DecodeResponse` / `ParseStream`），目前在 `internal/` 之下 proxy 無法重用，與 `model/chat/types.go` 職責重疊
+- [x] agentsdk 已於 `v0.0.19` 公開 stdlib-only `provider/protocol/sse`，含完整 frame、BOM、multiline data、大小限制與 writer；剩餘 consumer migration 見 [`docs/plans/2026-07-28-agentsdk-protocol-handover.md`](docs/plans/2026-07-28-agentsdk-protocol-handover.md)
+- [x] agentsdk 已於 `v0.0.17` 公開 `provider/protocol/openaichat`；評估結論是它屬 `core.Model*` adapter projection，不能取代 proxy 的 lossless `model/chat/types.go`
+- [ ] proxy 升至 `agentsdk v0.0.21`，以 compatibility alias / wrapper 採用 `provider/protocol/sse` 並移除 `model/sse.go` 的重複實作
 - [ ] `handlers/codex_log.go` 的 payload 欄位 allow-list 同屬可下沉項，但屬 body 層、獨立提案，不與 header 脫敏綁同一個 PR
 - [ ] `svc/transform/` 維持 pairwise 不上移；前置條件是 agentsdk `core.Part` 先支援 reasoning kind 與 `encrypted_content`，否則繞經 core 會靜默丟失 Anthropic `thinking` 與 Responses `reasoning`
 - [ ] `Dispatcher.Replace` 已脫離 token-refresh 路徑（decorator 每次呼叫重新解析），目前只剩測試在用，評估移除

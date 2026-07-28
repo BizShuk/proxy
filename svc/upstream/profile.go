@@ -282,7 +282,7 @@ func DefaultCatalog() (*Catalog, error) {
 			},
 			Preferred:               model.FORMAT_OPENAI_RESPONSES,
 			AuthScheme:              AUTH_BEARER,
-			AllowedRequestHeaders:   slices.Clone(defaultRequestHeaders),
+			AllowedRequestHeaders:   append(slices.Clone(defaultRequestHeaders), OPENAI_SAFETY_IDENTIFIER_HEADER),
 			AllowedResponseHeaders:  slices.Clone(defaultResponseHeaders),
 			ImageGenerationBaseURL:  "https://api.openai.com",
 			ImageGenerationEndpoint: "/v1/images/generations",
