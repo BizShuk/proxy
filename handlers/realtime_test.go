@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	authmodel "github.com/bizshuk/auth/model"
-	utils "github.com/bizshuk/auth/utils"
+	"github.com/bizshuk/gosdk/file"
 	"github.com/bizshuk/proxy/svc/upstream"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -201,14 +201,14 @@ func realtimeHandlerDeps(t *testing.T, credential *authmodel.Credential) Realtim
 	t.Helper()
 	catalog, err := upstream.DefaultCatalog()
 	require.NoError(t, err)
-	store, err := utils.NewFileStore(t.TempDir())
+	store, err := file.NewStore[*authmodel.Credential](t.TempDir())
 	require.NoError(t, err)
 	if credential != nil {
-		require.NoError(t, store.Save(credential))
+		require.NoError(t, store.Write(credential.Name(), credential))
 	}
 	resolver := upstream.NewCredentialResolver(store, nil, func(string) (string, bool) {
 		return "", false
-	})
+	}, nil)
 	return RealtimeHandlerDeps{
 		Catalog:           catalog,
 		Credentials:       resolver,

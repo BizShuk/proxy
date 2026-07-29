@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "proxy-imagegen@proxy-local": true
+  },
+  "extraKnownMarketplaces": {
+    "proxy-local": {
+      "source": {
+        "source": "directory",
+        "path": "/Users/shuk/projects/ai/proxy"
+      }
+    }
+  }
+}

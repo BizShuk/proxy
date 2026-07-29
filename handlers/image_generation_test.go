@@ -10,7 +10,7 @@ import (
 	"time"
 
 	authmodel "github.com/bizshuk/auth/model"
-	utils "github.com/bizshuk/auth/utils"
+	"github.com/bizshuk/gosdk/file"
 	"github.com/bizshuk/proxy/svc/transform"
 	"github.com/bizshuk/proxy/svc/upstream"
 	"github.com/gin-gonic/gin"
@@ -189,13 +189,14 @@ func newImageHandlerForCredential(
 	imageCatalog, err := upstream.NewCatalog(imageProfiles)
 	require.NoError(t, err)
 
-	store, err := utils.NewFileStore(t.TempDir())
+	store, err := file.NewStore[*authmodel.Credential](t.TempDir())
 	require.NoError(t, err)
-	require.NoError(t, store.Save(credential))
+	require.NoError(t, store.Write(credential.Name(), credential))
 	credentials := upstream.NewCredentialResolver(
 		store,
 		nil,
 		func(string) (string, bool) { return "", false },
+		nil,
 	)
 	client, err := upstream.NewClient(httpClient, upstream.TimeoutConfig{
 		MessagesMs: 1000, StreamMessagesMs: 1000, CountTokensMs: 1000,

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	authmodel "github.com/bizshuk/auth/model"
-	utils "github.com/bizshuk/auth/utils"
+	"github.com/bizshuk/gosdk/file"
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/model/anthropic"
 	"github.com/bizshuk/proxy/model/chat"
@@ -335,10 +335,10 @@ func newHandlerForCredentialWithLimit(t *testing.T, credential *authmodel.Creden
 	require.NoError(t, err)
 	registry, err := transform.NewDefaultRegistry()
 	require.NoError(t, err)
-	store, err := utils.NewFileStore(t.TempDir())
+	store, err := file.NewStore[*authmodel.Credential](t.TempDir())
 	require.NoError(t, err)
-	require.NoError(t, store.Save(credential))
-	credentials := upstream.NewCredentialResolver(store, nil, func(string) (string, bool) { return "", false })
+	require.NoError(t, store.Write(credential.Name(), credential))
+	credentials := upstream.NewCredentialResolver(store, nil, func(string) (string, bool) { return "", false }, nil)
 	client, err := upstream.NewClient(httpClient, upstream.TimeoutConfig{
 		MessagesMs: 1000, StreamMessagesMs: 1000, CountTokensMs: 1000,
 	})
@@ -881,9 +881,9 @@ func newHandlerDeps(t *testing.T, httpClient *http.Client) HandlerDeps {
 	require.NoError(t, err)
 	registry, err := transform.NewDefaultRegistry()
 	require.NoError(t, err)
-	store, err := utils.NewFileStore(t.TempDir())
+	store, err := file.NewStore[*authmodel.Credential](t.TempDir())
 	require.NoError(t, err)
-	credentials := upstream.NewCredentialResolver(store, nil, func(string) (string, bool) { return "", false })
+	credentials := upstream.NewCredentialResolver(store, nil, func(string) (string, bool) { return "", false }, nil)
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}

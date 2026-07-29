@@ -40,16 +40,16 @@
 
 # ── A. OS / File system metadata ──────────────────────────────────────────────
 
-.DS*Store
+.DS_Store
 .DS_Store?
-.*_
+.**
 .Spotlight-V100
 .Trashes
 ehthumbs.db
 Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
-_~
+*~
 
 # ── B. Editor / IDE ─────────────────────────────────────────────────────────
 
@@ -60,32 +60,32 @@ _~
 !.vscode/launch.json
 !.vscode/extensions.json
 .idea/
-_.iml
-_.swp
-_.swo
-_.swn
-_.sublime-project
-_.sublime-workspace
+*.iml
+*.swp
+*.swo
+*.swn
+*.sublime-project
+*.sublime-workspace
 .fleet/
 .cursor/
 .codium/
-\*.code-workspace
+*.code-workspace
 .project
 .classpath
 .settings/
 
 # ── C. Node / JavaScript / TypeScript ────────────────────────────────────────
 
-node*modules/
+node_modules/
 jspm_packages/
 .npm/
 .yarn/
 .pnp.*
 .pnpm-store/
-.pnpm-debug.log\_
+.pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-npm-debug.log\*
+npm-debug.log*
 .eslintcache
 .stylelintcache
 .prettiercache
@@ -101,7 +101,7 @@ npm-debug.log\*
 
 # TypeScript build info
 
-\*.tsbuildinfo
+*.tsbuildinfo
 
 # Compiled output
 
@@ -109,27 +109,27 @@ out/
 dist/
 build/
 lib/
-_.js.map
-_.mjs.map
-_.cjs.map
-_.d.ts.map
-\*.d.ts
+*.js.map
+*.mjs.map
+*.cjs.map
+*.d.ts.map
+*.d.ts
 
 # Bundle / minified
 
-_.min.js
-_.min.mjs
-_.min.css
-_.bundle.js
-_.chunk.js
-_.hot-update.js
-\*.hot-update.json
+*.min.js
+*.min.mjs
+*.min.css
+*.bundle.js
+*.chunk.js
+*.hot-update.js
+*.hot-update.json
 
 # Coverage
 
 coverage/
 .nyc_output/
-\*.lcov
+*.lcov
 
 # Jest / Vitest
 
@@ -145,13 +145,13 @@ coverage/
 
 # Binaries
 
-_.exe
-_.exe~
-_.dll
-_.so
-_.dylib
-_.test
-\*.out
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
 
 # Go workspace
 
@@ -171,19 +171,19 @@ vendor/
 
 # Cobra / stringer generated
 
-\_\_debug*bin
-*\_string.go
-\_\_stringer.go
+*_debug_bin
+*_string.go
+*_stringer.go
 
 # ── E. Python / Rust / JVM ───────────────────────────────────────────────────
 
 # Python
 
-**pycache**/
-_.py[cod]
-_$py.class
-_.egg
-_.egg-info/
+*_pycache__/
+*.py[cod]
+*$py.class
+*.egg
+*.egg-info/
 .eggs/
 .pytest_cache/
 .mypy_cache/
@@ -196,33 +196,33 @@ ENV/
 pip-wheel-metadata/
 htmlcov/
 .coverage
-.coverage.\*
+.coverage.*
 
 # Rust
 
-target/ \*_/_.rs.bk
+target/ **/*.rs.bk
 Cargo.lock.bak
 
 # JVM
 
-_.class
-_.jar
-_.war
-_.ear
+*.class
+*.jar
+*.war
+*.ear
 .gradle/
 build/
-hs_err_pid\*
+hs_err_pid*
 
 # ── F. Build / Dist / Packages ───────────────────────────────────────────────
 
-_.vsix
-_.tgz
-_.tar.gz
-_.zip
-_.dmg
-_.deb
-_.rpm
-_.app
+*.vsix
+*.tgz
+*.tar.gz
+*.zip
+*.dmg
+*.deb
+*.rpm
+*.app
 
 # ── G. Tests / Coverage (general) ───────────────────────────────────────────
 
@@ -232,34 +232,34 @@ playwright/.cache/
 cypress/videos/
 cypress/screenshots/
 junit.xml
-_.trx
-_.coverage
-\*.lcov
+*.trx
+*.coverage
+*.lcov
 
 # ── H. Logs / Runtime dumps ──────────────────────────────────────────────────
 
 logs/
-_.log
-_.log._
+*.log
+*.log.*
 !.npmrc.log
 !yarn.log
 !yarn-error.log
-!npm-debug.log_
+!npm-debug.log*
 .pids
-_.pid
-_.seed
-\*.pid.lock
+*.pid
+*.seed
+*.pid.lock
 
 # Heap / core dumps
 
-heapdump.\*
-_.core
-core._
+heapdump.*
+*.core
+core.*
 
 # ── I. Secrets / Env / Local config ─────────────────────────────────────────
 
 .env
-.env._
+.env.*
 !.env.example
 .env.tmp
 .env.local
@@ -267,46 +267,46 @@ core._
 
 # SSH keys (private keys, configs, known_hosts, agent sockets)
 
-id*rsa
+id_rsa
 id_rsa.*
-id*dsa
+id_dsa
 id_dsa.*
-id*ecdsa
+id_ecdsa
 id_ecdsa.*
-id*ed25519
+id_ed25519
 id_ed25519.*
-id*xmss
-id_xmss.\*
+id_xmss
+id_xmss.*
 *.pub
-!\_.ignore.pub
+!_.ignore.pub
 known_hosts
 authorized_keys
 ssh_config
 .ssh/
 .ssh/known_hosts
 .ssh/authorized_keys
-\*.ppk
+*.ppk
 ssh-agent-sock
 agent.sock
 
 # GPG / PGP
 
-_.asc
-_.gpg
-\*.pgp
+*.asc
+*.gpg
+*.pgp
 secring.gpg
 pubring.gpg
 .gnupg/
 
 # SSL / TLS
 
-_.pem
-_.key
-_.crt
-_.cer
-_.csr
-_.p12
-\*.pfx
+*.pem
+*.key
+*.crt
+*.cer
+*.csr
+*.p12
+*.pfx
 keystore.jks
 truststore.jks
 
@@ -323,7 +323,7 @@ config/local.toml
 
 # 這裡只忽略常見的"次要"或備份
 
-\*.lock.bak
+*.lock.bak
 package-lock.json.bak
 yarn.lock.bak
 
@@ -332,6 +332,7 @@ yarn.lock.bak
 # Claude Code
 
 .claude/
+!.claude/
 !.claude/commands/
 !.claude/agents/
 !.claude/skills/
@@ -347,7 +348,7 @@ yarn.lock.bak
 
 # Aider
 
-.aider\*
+.aider*
 .aider.chat.history.md
 .aider.input.history
 .aider.tags.cache.v3/
@@ -396,7 +397,7 @@ scratch/
 samples/
 sample/
 example/
-docs/\_build/
+docs/_build/
 docs/build/
 site/
 gh-pages/
@@ -406,13 +407,13 @@ downloads/
 backup/
 backups/
 archive/
-_.bak
-_.tmp
-_.temp
-_.orig
-_.rej
-_.swp
-\*.patch
+*.bak
+*.tmp
+*.temp
+*.orig
+*.rej
+*.swp
+*.patch
 
 # Task / planning scratch (常見散落)
 

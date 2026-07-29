@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"sort"
 	"testing"
 
 	authmodel "github.com/bizshuk/auth/model"
@@ -15,23 +16,25 @@ type stubStore struct {
 	creds map[string]*authmodel.Credential
 }
 
-func (s *stubStore) Dir() string { return "" }
-func (s *stubStore) Load(name string) (*authmodel.Credential, error) {
+func (s *stubStore) Read(name string) (*authmodel.Credential, error) {
 	c, ok := s.creds[name]
 	if !ok {
 		return nil, authmodel.ErrNotFound
 	}
 	return c, nil
 }
-func (s *stubStore) List() ([]*authmodel.Credential, error) {
-	out := make([]*authmodel.Credential, 0, len(s.creds))
-	for _, c := range s.creds {
-		out = append(out, c)
+
+// List mirrors gosdk/file.Store: sorted names, not credentials.
+func (s *stubStore) List() ([]string, error) {
+	out := make([]string, 0, len(s.creds))
+	for name := range s.creds {
+		out = append(out, name)
 	}
+	sort.Strings(out)
 	return out, nil
 }
-func (s *stubStore) Save(c *authmodel.Credential) error {
-	s.creds[c.Name()] = c
+func (s *stubStore) Write(name string, c *authmodel.Credential) error {
+	s.creds[name] = c
 	return nil
 }
 

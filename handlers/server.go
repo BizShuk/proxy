@@ -14,9 +14,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/bizshuk/auth/active"
 	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/auth/provider"
-	utils "github.com/bizshuk/auth/utils"
+	"github.com/bizshuk/gosdk/file"
 	"github.com/bizshuk/gosdk/mw"
 	"github.com/bizshuk/gosdk/router"
 	pxconfig "github.com/bizshuk/proxy/config"
@@ -52,13 +53,14 @@ func New(cfg *pxconfig.Config) (*Server, error) {
 	if cfg.BodyLimit <= 0 || int64(cfg.BodyLimit) > MAX_BODY_LIMIT_MB {
 		return nil, fmt.Errorf("new proxy server: body limit must be between 1 and %d MB", MAX_BODY_LIMIT_MB)
 	}
-	store, err := utils.NewFileStore(cfg.AuthDir)
+	store, err := file.NewStore[*authmodel.Credential](cfg.AuthDir,
+		file.WithDirPerm(0o700), file.WithFilePerm(0o600))
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server credential store: %w", err)
 	}
 	credentials := upstream.NewCredentialResolver(store, func(credential *authmodel.Credential) (authmodel.Authenticator, error) {
 		return provider.For(credential)
-	}, os.LookupEnv)
+	}, os.LookupEnv, active.Lookup)
 	catalog, err := upstream.DefaultCatalog()
 	if err != nil {
 		return nil, fmt.Errorf("new proxy server catalog: %w", err)

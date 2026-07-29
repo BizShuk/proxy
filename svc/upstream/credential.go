@@ -9,15 +9,21 @@ import (
 	"github.com/bizshuk/proxy/model"
 )
 
+// credentialStore mirrors svc.ResolverStore; gosdk/file.Store satisfies it.
 type credentialStore interface {
-	Dir() string
-	Load(string) (*authmodel.Credential, error)
-	List() ([]*authmodel.Credential, error)
-	Save(*authmodel.Credential) error
+	Read(name string) (*authmodel.Credential, error)
+	List() ([]string, error)
+	Write(name string, cred *authmodel.Credential) error
 }
 
 type authenticatorResolver func(*authmodel.Credential) (authmodel.Authenticator, error)
 type environmentLookup func(string) (string, bool)
+
+// activeLookup reports the credential this application selected for a
+// provider family. The proxy injects auth/active.Lookup, which reads the
+// selection from its own settings file — so several services can share one
+// credential directory and still each pick their own credential.
+type activeLookup func(string) (string, bool)
 
 // ResolvedCredential is the validated credential selected for one request.
 type ResolvedCredential = authmodel.Credential
@@ -30,9 +36,10 @@ type CredentialResolver struct {
 }
 
 // NewCredentialResolver constructs a request-scoped credential resolver.
-func NewCredentialResolver(store credentialStore, resolveAuth authenticatorResolver, lookupEnvironment environmentLookup) *CredentialResolver {
+func NewCredentialResolver(store credentialStore, resolveAuth authenticatorResolver, lookupEnvironment environmentLookup, lookupActive activeLookup) *CredentialResolver {
 	return &CredentialResolver{
-		inner: svc.NewResolver(store, svc.AuthenticatorFor(resolveAuth), svc.EnvLookup(lookupEnvironment)),
+		inner: svc.NewResolver(store, svc.AuthenticatorFor(resolveAuth),
+			svc.EnvLookup(lookupEnvironment), svc.ActiveLookup(lookupActive)),
 	}
 }
 

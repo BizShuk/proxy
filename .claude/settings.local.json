@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__codegraph__codegraph_explore"
+    ]
+  },
+  "skillOverrides": {
+    "apple-calendar": "off"
+  }
+}

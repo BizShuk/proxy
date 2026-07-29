@@ -2,10 +2,8 @@ package upstream
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -29,7 +27,7 @@ func TestCredentialResolverRefreshesWithRequestContextAndSaves(t *testing.T) {
 	}}
 	resolver := NewCredentialResolver(store, func(*authmodel.Credential) (authmodel.Authenticator, error) {
 		return authenticator, nil
-	}, func(string) (string, bool) { return "", false })
+	}, func(string) (string, bool) { return "", false }, nil)
 
 	cred, err := resolver.Resolve(ctx, "openai")
 	require.NoError(t, err)
@@ -48,8 +46,8 @@ func TestCredentialResolverSelectsActiveThenAlphabeticFallback(t *testing.T) {
 
 	t.Run("active selection", func(t *testing.T) {
 		store := newFakeCredentialStore(t, creds)
-		writeActiveMap(t, store.Dir(), map[string]string{"openai": creds[0].Name()})
-		resolver := newTestCredentialResolver(store)
+		resolver := newTestCredentialResolverWithActive(store,
+			staticActive(map[string]string{"openai": creds[0].Name()}))
 
 		cred, err := resolver.Resolve(context.Background(), "openai")
 		require.NoError(t, err)
@@ -84,7 +82,7 @@ func TestCredentialResolverUsesProviderEnvironmentFallback(t *testing.T) {
 					return tc.provider + "-secret", true
 				}
 				return "", false
-			})
+			}, nil)
 
 			cred, err := resolver.Resolve(context.Background(), tc.provider)
 			require.NoError(t, err)
@@ -97,21 +95,17 @@ func TestCredentialResolverUsesProviderEnvironmentFallback(t *testing.T) {
 
 func TestCredentialResolverRejectsInvalidActiveSelection(t *testing.T) {
 	tests := []struct {
-		name      string
-		activeRaw []byte
-		creds     []*authmodel.Credential
+		name   string
+		active map[string]string
+		creds  []*authmodel.Credential
 	}{
 		{
-			name:      "malformed active map",
-			activeRaw: []byte(`{"openai":`),
+			name:   "active credential cannot be loaded",
+			active: map[string]string{"openai": "missing"},
 		},
 		{
-			name:      "active credential cannot be loaded",
-			activeRaw: []byte(`{"openai":"missing"}`),
-		},
-		{
-			name:      "active credential belongs to another provider",
-			activeRaw: []byte(`{"openai":"anthropic-apikey"}`),
+			name:   "active credential belongs to another provider",
+			active: map[string]string{"openai": "anthropic-apikey"},
 			creds: []*authmodel.Credential{{
 				Provider: "anthropic", Kind: authmodel.KIND_API_KEY, APIKey: "secret",
 			}},
@@ -120,8 +114,7 @@ func TestCredentialResolverRejectsInvalidActiveSelection(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeCredentialStore(t, tc.creds)
-			require.NoError(t, os.WriteFile(filepath.Join(store.Dir(), "active.json"), tc.activeRaw, 0o600))
-			resolver := newTestCredentialResolver(store)
+			resolver := newTestCredentialResolverWithActive(store, staticActive(tc.active))
 
 			_, err := resolver.Resolve(context.Background(), "openai")
 			var proxyErr *model.ProxyError
@@ -161,7 +154,7 @@ func TestCredentialResolverReturnsUnavailableOnRefreshOrSaveFailure(t *testing.T
 			store.saveErr = tc.saveErr
 			resolver := NewCredentialResolver(store, func(*authmodel.Credential) (authmodel.Authenticator, error) {
 				return tc.authenticator, nil
-			}, func(string) (string, bool) { return "", false })
+			}, func(string) (string, bool) { return "", false }, nil)
 
 			cred, err := resolver.Resolve(context.Background(), "openai")
 			assert.Nil(t, cred)
@@ -198,9 +191,7 @@ func newFakeCredentialStore(t *testing.T, creds []*authmodel.Credential) *fakeCr
 	return &fakeCredentialStore{dir: t.TempDir(), creds: creds}
 }
 
-func (s *fakeCredentialStore) Dir() string { return s.dir }
-
-func (s *fakeCredentialStore) Load(name string) (*authmodel.Credential, error) {
+func (s *fakeCredentialStore) Read(name string) (*authmodel.Credential, error) {
 	if s.loadErr != nil {
 		return nil, s.loadErr
 	}
@@ -213,14 +204,20 @@ func (s *fakeCredentialStore) Load(name string) (*authmodel.Credential, error) {
 	return nil, authmodel.ErrNotFound
 }
 
-func (s *fakeCredentialStore) List() ([]*authmodel.Credential, error) {
+// List mirrors gosdk/file.Store: sorted names, not credentials.
+func (s *fakeCredentialStore) List() ([]string, error) {
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
-	return append([]*authmodel.Credential(nil), s.creds...), nil
+	names := make([]string, 0, len(s.creds))
+	for _, cred := range s.creds {
+		names = append(names, cred.Name())
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
-func (s *fakeCredentialStore) Save(cred *authmodel.Credential) error {
+func (s *fakeCredentialStore) Write(_ string, cred *authmodel.Credential) error {
 	if s.saveErr != nil {
 		return s.saveErr
 	}
@@ -252,16 +249,22 @@ func (a *fakeAuthenticator) Verify(context.Context, *authmodel.Credential) (*aut
 }
 
 func newTestCredentialResolver(store credentialStore) *CredentialResolver {
-	return NewCredentialResolver(store, func(*authmodel.Credential) (authmodel.Authenticator, error) {
-		return nil, errors.New("unexpected authenticator resolution")
-	}, func(string) (string, bool) { return "", false })
+	return newTestCredentialResolverWithActive(store, nil)
 }
 
-func writeActiveMap(t *testing.T, dir string, active map[string]string) {
-	t.Helper()
-	raw, err := json.Marshal(active)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "active.json"), raw, 0o600))
+func newTestCredentialResolverWithActive(store credentialStore, lookupActive activeLookup) *CredentialResolver {
+	return NewCredentialResolver(store, func(*authmodel.Credential) (authmodel.Authenticator, error) {
+		return nil, errors.New("unexpected authenticator resolution")
+	}, func(string) (string, bool) { return "", false }, lookupActive)
+}
+
+// staticActive stands in for auth/active.Lookup, which reads the selection
+// from the application's settings file via viper.
+func staticActive(selection map[string]string) activeLookup {
+	return func(family string) (string, bool) {
+		name, ok := selection[family]
+		return name, ok
+	}
 }
 
 func valueOrEmpty(cred *ResolvedCredential) string {
