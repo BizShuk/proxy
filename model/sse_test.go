@@ -7,9 +7,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bizshuk/agentsdk/provider/protocol/sse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSSECompatibilityFacadeUsesSharedTypes(t *testing.T) {
+	var sharedFrame sse.Frame = SSEFrame{Data: []byte("shared")}
+	var compatibilityFrame SSEFrame = sharedFrame
+	assert.Equal(t, sharedFrame, compatibilityFrame)
+
+	var sharedDecoder *sse.Decoder = NewSSEDecoder(strings.NewReader("data: shared\n\n"))
+	frame, err := sharedDecoder.Next()
+	require.NoError(t, err)
+	assert.Equal(t, sharedFrame, frame)
+
+	assert.Equal(t, sse.MAX_FRAME_BYTES, MAX_SSE_FRAME_BYTES)
+	require.ErrorIs(t, ErrUnexpectedEOF, sse.ErrUnexpectedEOF)
+	require.ErrorIs(t, ErrSSELineTooLarge, sse.ErrLineTooLarge)
+	require.ErrorIs(t, ErrSSEFrameTooLarge, sse.ErrFrameTooLarge)
+}
 
 func TestSSEDecoderMultilineData(t *testing.T) {
 	raw := "event: response.output_text.delta\r\nid: event_1\r\nretry: 1500\r\n: keepalive\r\ndata: {\"type\":\r\ndata: \"delta\"}\r\n\r\n"

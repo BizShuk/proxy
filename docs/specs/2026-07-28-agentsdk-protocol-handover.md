@@ -1,6 +1,6 @@
-# 架構計畫 — agentsdk-protocol-handover
+# 架構規格 — agentsdk-protocol-handover
 
-狀態：`Partially Landed`
+狀態：`Landed`
 
 日期：`2026-07-28`
 
@@ -18,7 +18,8 @@
 - 不把 `proxy/svc/transform` 的 pairwise translation 上移。
 - 不把 provider-specific terminal event 放進 generic SSE package。
 - 不因 DTO 欄位相似就合併 Anthropic、Responses 或其他 vendor wire model。
-- 本輪不修改 `proxy` 的 Go dependency 或 production code。
+- 不在同一輪要求 callers 直接改 import；compatibility facade 保留既有
+  `model.SSEFrame` API。
 
 ## 2. 現況架構 (Current Architecture)
 
@@ -26,10 +27,10 @@
 
 | 邊界 | 現況 |
 | --- | --- |
-| `proxy` dependency | `go.mod` 仍使用 `github.com/bizshuk/agentsdk v0.0.16` |
-| `proxy` SSE | `model/sse.go` 自有完整 frame decoder / writer，含 BOM 與 `1 MiB` 上限 |
-| `agentsdk` SSE | `v0.0.19` 已公開 stdlib-only `provider/protocol/sse`；`v0.0.21` 可由 Go module proxy 下載 |
-| `agentsdk` parser adoption | `provider/protocol/openaichat` 已採用共用 decoder；Anthropic、Antigravity、Codex、Grok、MiniMax 五份 parser 仍各自使用 `bufio.Scanner` |
+| `proxy` dependency | `go.mod` 使用 `github.com/bizshuk/agentsdk v0.0.24` |
+| `proxy` SSE | `model/sse.go` 僅保留 `sse.Frame` / `Decoder` / errors / constants 的 compatibility facade |
+| `agentsdk` SSE | `provider/protocol/sse` 單一擁有完整 frame、BOM、multiline data、大小限制與 writer |
+| `agentsdk` parser adoption | `openaichat`、Anthropic、Antigravity、Codex、Grok、MiniMax 均採用共用 decoder |
 | `agentsdk` OpenAI Chat | `v0.0.17` 已將 `provider/internal/openaichat` 移至公開的 `provider/protocol/openaichat` |
 | `proxy` OpenAI Chat | `model/chat/types.go` 保存 client / upstream wire DTO，供 `3×3` pairwise transform 使用 |
 
@@ -38,7 +39,7 @@ flowchart LR
     U["Provider SSE bytes"] -->|"framing"| AS["agentsdk provider/protocol/sse"]
     AS -->|"Frame"| AC["agentsdk provider/protocol/openaichat"]
     AC -->|"ModelChunk"| AO["Google / Ollama adapters"]
-    P["proxy upstream bytes"] -->|"framing"| PS["proxy model/sse"]
+    P["proxy upstream bytes"] -->|"compatibility wrapper"| PS["proxy model/sse facade"]
     PS -->|"SSEFrame"| PT["proxy pairwise transforms"]
     PT -->|"SSEFrame"| PC["proxy client"]
 ```
@@ -103,14 +104,14 @@ flowchart LR
 `agentsdk/provider/protocol/sse` 與 `proxy/model/sse.go` 的 transport contract
 相同，且上游額外覆蓋 nil reader。`proxy` 不應再維護第二份實作。
 
-但 package 存在不代表遷移完成：
+遷移已於 `agentsdk v0.0.24` 與 proxy 完成：
 
-- 目前只有 `provider/protocol/openaichat` 使用共用 decoder。
-- Anthropic、Antigravity、Codex、Grok、MiniMax 仍逐行解析，沒有 BOM 與完整
-  multiline frame 行為。
-- 每個 parser 必須先鎖定自身 `[DONE]` / `message_stop` /
-  `response.completed`、transport error、context cancellation 與 terminal chunk
-  contract，再個別換成 `sse.Decoder`。
+- agentsdk 的 `openaichat`、Anthropic、Antigravity、Codex、Grok、MiniMax parser
+  均使用 `sse.Decoder`。
+- proxy 的 `model/sse.go` 只保留型別 / 錯誤 alias 與 constructor / writer wrapper，
+  原有 callers 不需改動。
+- `[DONE]`、`message_stop`、`response.completed` 等 terminal semantics 仍由各
+  provider / format consumer 判讀。
 
 ### 5.2 公開 `openaichat`
 
@@ -136,25 +137,25 @@ agentsdk 擴大公開 DTO surface。
 
 1. `已完成`：agentsdk 以 `v0.0.17` 公開 `provider/protocol/openaichat`，以
    `v0.0.19` 公開 `provider/protocol/sse`。
-2. `agentsdk follow-up`：五個剩餘 parser 各自加入 BOM、multiline frame、
-   oversize / partial frame、terminal semantics regression tests，再改用
-   `sse.Decoder`。每個 provider 可獨立回滾。
-3. `proxy follow-up`：升級至已發布且含 reasoning contract 的 `v0.0.21`；先把
-   `model/sse.go` 改為 `sse.Frame` / `Decoder` / errors / constants 的 compatibility
-   aliases 與薄 wrapper，保持現有 `model.SSEFrame` 呼叫者不動。
-4. 通過 `model`、`svc/transform`、`handlers` 全部測試後，再決定是否讓 callers
-   直接 import `provider/protocol/sse` 並刪除 compatibility facade。
-5. `proxy/model/chat/types.go` 維持原位；本提案不安排 `openaichat` migration。
+2. `已完成`：agentsdk `v0.0.24` 的五個剩餘 parser 已加入共用 decoder，
+   provider-specific terminal semantics 維持在 consumer。
+3. `已完成`：proxy 升至 `v0.0.24`，`model/sse.go` 改為 `sse.Frame` / `Decoder` /
+   errors / constants 的 compatibility aliases 與薄 wrapper。
+4. `已完成`：`model`、`svc/transform`、`handlers` 與完整 repo verification 通過；
+   callers 目前保留 compatibility facade，避免不必要的跨 package churn。
+5. `維持原決策`：`proxy/model/chat/types.go` 留在原位，不採用有損的
+   `openaichat` projection。
 
 ## 7. 驗收與回滾 (Verification & Rollback)
 
-目前證據：
+完成證據：
 
-- `go test ./provider/protocol/sse ./provider/protocol/openaichat`：通過。
-- `go mod download github.com/bizshuk/agentsdk@v0.0.21`：通過。
-- remote tags `v0.0.17`、`v0.0.19`、`v0.0.21`：存在。
+- `go mod download -json github.com/bizshuk/agentsdk@v0.0.24`：確認 tag
+  `v0.0.24` 與 module checksum。
+- `go test ./model ./svc/transform ./handlers -count=1 -timeout=180s`：通過。
+- `npm run verify`：完整 test、build、vet 通過。
 
-後續 code migration 的必要 gate：
+固定驗證 gate：
 
 ```bash
 go test ./model ./svc/transform ./handlers

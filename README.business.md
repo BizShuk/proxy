@@ -152,6 +152,6 @@ stateDiagram-v2
 - **HTTP 表面與中介層 (`handlers/server.go` / `middleware.go` / `observability.go`)**：組 gin engine、API key 認證、CORS、rate limit、OTel counters — 沒有它 proxy 不能運作，但只是接入層 (支撐核心)
 - **結構化日誌 (`handlers/codex_log.go` / `upstream_error_log.go`)**：把上游錯誤、codex 脫敏 metadata、stream 終止原因寫進 slog；不含商業邏輯但是營運必要的可觀測性 (支撐核心 — 沒有它無法在 production debug)
 - **設定載入 (`config/config.go` + `cmd/proxy.go` + `main.go`)**：viper 設定合併、預設值、cobra CLI、graceful shutdown — 不產生收入但是啟動必要 (支撐核心)
-- **SSE decoder (`model/sse.go`)**：bounded SSE 解析 + 寫出，是 streaming 路徑的工具層 (支撐核心)
+- `SSE compatibility facade (model/sse.go)`：保留既有 proxy API，實際 bounded SSE 解析與寫出由 agentsdk `provider/protocol/sse` 擁有 (支撐核心)
 - **錯誤模型 (`model/error.go`)**：`ProxyError` 統一錯誤型別 + 依 source format 編碼，是 cross-cutting concern (支撐核心 — 三個領域都要用)
 - Codex / Claude Code 圖片 MCP 接入 (`mcpimage/*` / `plugins/proxy-imagegen`)：把既有圖片 HTTP 端點包成 agent 工具，負責 client 設定、Base64 解碼與專案檔案輸出

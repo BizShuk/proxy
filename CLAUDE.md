@@ -37,7 +37,7 @@ proxy/
 │   ├── format.go                 # Format enum (anthropic-messages/openai-chat/openai-responses)
 │   ├── envelope.go               # RequestEnvelope / ResponseEnvelope / Exchange / TransformResult
 │   ├── error.go                  # ProxyError + EncodeError (依 format 編碼)
-│   └── sse.go                    # SSEFrame / SSEDecoder / WriteSSE
+│   └── sse.go                    # agentsdk provider/protocol/sse compatibility facade
 ├── model/
 │   ├── anthropic/types.go        # Anthropic Messages wire DTO
 │   ├── chat/types.go             # OpenAI Chat Completions wire DTO
@@ -79,7 +79,7 @@ proxy/
 - CLI: `github.com/spf13/cobra` v1.10.2 + `github.com/spf13/viper` v1.20.1
 - Config / logging / middleware: `github.com/bizshuk/gosdk` v1.2.5
 - Auth: `github.com/bizshuk/auth` v0.0.0-20260718180648-a05ed97812a8 (FileStore + svc.Resolver + provider.For)
-- Provider SDK: `github.com/bizshuk/agentsdk` v0.0.15 (core + provider/\* via dispatcher)
+- Provider SDK: `github.com/bizshuk/agentsdk` v0.0.24 (core + provider/\* + protocol/sse)
 - MCP SDK: `github.com/modelcontextprotocol/go-sdk` v1.6.0
 - Observability: `log/slog` (stdlib) + `go.opentelemetry.io/otel` v1.44.0
 - Test: `github.com/stretchr/testify` v1.11.1
@@ -109,7 +109,7 @@ proxy/
 - Grok response metadata (`x-grok-context-window` / `x-grok-max-completion-tokens` / `x-models-etag` / `x-should-retry`) 列入 profile allowlist；成功走 `copySafeResponseHeaders`，4xx/5xx 走會移除 upstream content type 的 `copySafeErrorResponseHeaders`。
 - `normalizeXAIGrokOAuthRequest` 保留 xAI-specific raw tools；Responses 預設 `store:false` + `reasoning.encrypted_content`，streaming Chat 合併 `stream_options.include_usage:true`，Messages 缺少 `max_tokens` 時用 `128000`。
 - Anthropic `thinking` 與 Responses typed `reasoning` 必須對稱：`id` / `summary` / `encrypted_content` 以版本化 `thinking.signature` 保存，SSE 在 reasoning item 完成時送 `signature_delta`；非本 proxy 產生的 Anthropic signature 只記 semantic loss，不冒充 Responses encrypted state。
-- `SSEDecoder` 只在 stream 開頭移除 UTF-8 BOM；這是 Grok 三種 streaming endpoint 的共同相容需求，不放進個別 transform。
+- SSE framing 由 agentsdk `provider/protocol/sse` 單一擁有；`model/sse.go` 只保留 compatibility aliases / wrappers。共用 decoder 只在 stream 開頭移除 UTF-8 BOM，provider / format terminal semantics 仍留在個別 transform。
 - auth storage provider ID 與 Agents SDK provider ID 不同名 (`xai` vs `grok`、`openai` vs `codex`)，這個邊界映射由 agentsdk 的 `provider/credential` 擁有 (`credential.RouteID` / `credential.Names`)，proxy 不再自備路由表。舊碼的 `familiesInDefaultOrder` 直接向 resolver 查 `codex`，但 auth 從不以該名存憑證，故 codex 憑證實際上永遠只能從 env fallback 進來；改用 `credential.Names()` 後修正。
 - `core.Provider` 是純能力介面 (`Generate` / `Stream`)，不帶 `ID()` / `Models()`：名字屬於索引 adapter 的 registry，不屬於 adapter 自身。因此 `Dispatcher.Set(name, adapter)` 由呼叫端給名，`AdvertisedModels` 走 `provider.Catalog(name)`（免憑證、免 I/O）。
 - 憑證不再於建構時快照：`credential.Source.Decorator()` 每次呼叫重新向 auth store 解析，token 輪替不需 `Dispatcher.Replace`。startup 仍探測一次，讓沒有憑證的 family 不出現在 `/v1/models`。
@@ -211,7 +211,7 @@ npm run verify
 - Testing:
     - 全部使用 `testify/assert` 與 `testify/require`
     - `model.ALL_FORMATS` 在 `Registry.NewRegistry` 內被列舉驗證；測試通常用 `NewDefaultRegistry()` 拿到 production matrix
-    - SSE 測試透過 `model.NewBoundedSSEDecoder` 與 `model.WriteSSE` 構造 round-trip
+    - SSE 測試透過 `model.NewBoundedSSEDecoder` 與 `model.WriteSSE` compatibility facade 構造 round-trip，並驗證其型別與錯誤直接對應 agentsdk `provider/protocol/sse`
 - Streaming:
     - `StreamTransform.Push(ctx, frame)` 與 `Close(ctx)` 都接收 ctx，便於 client 取消時及時釋放
     - `WriteTimeout: 0` 在 `newHTTPServer` 內強制設定；client cancel 走 graceful shutdown
