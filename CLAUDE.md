@@ -27,7 +27,8 @@ proxy/
 ├── handlers/                     # gin engine + 全部 HTTP 表面
 │   ├── server.go                 # Server.New: 組 engine + middleware + 路由表
 │   ├── handler.go                # Handler.Handle / HandleModels / HandleCountTokens
-│   ├── image_generation.go       # /v1/images/generations xAI JSON pass-through
+│   ├── image_generation.go       # /v1/images/generations OpenAI-compatible JSON pass-through
+│   ├── image_edit.go             # /v1/images/edits multipart image-edit pass-through
 │   ├── middleware.go             # requireAPIKey / corsLocalhost / rateLimitPerIP
 │   ├── observability.go          # TransformObserver (OTel counters + slog)
 │   ├── codex_log.go              # Codex OAuth 請求脫敏 metadata log
@@ -62,7 +63,7 @@ proxy/
 │       ├── dispatcher_default.go # NewDefaultDispatcher (走 provider.Names() + env-var)
 │       ├── dispatcher_oauth.go   # NewDispatcherWithAuth[AndEnv] (走 agentsdk credential.Source)
 │       ├── credential.go         # CredentialResolver (包 auth/svc.Resolver)
-│       ├── client.go             # Client.Do / CountTokens / GenerateImage + header/secret 套用
+│       ├── client.go             # Client.Do / CountTokens / GenerateImage / EditImage + header/secret 套用
 │       ├── client.go             # Client.Do / CountTokens + header/secret 套用
 │       ├── realtime.go           # 固定 Realtime endpoints + API-key target/header
 │       └── config.go             # TimeoutConfig
@@ -102,6 +103,7 @@ proxy/
 - `xai-grok-oauth` 對齊 `grok-build` 的三種 inference protocol：`/responses`、`/chat/completions`、`/messages`。`xai-responses` / `xai-chat` / `xai-messages` qualifier 強制 target format；無 format qualifier 時偏好 Responses。
 - Grok OAuth request 固定由 `Client.do` 注入 bearer、`X-XAI-Token-Auth`、`x-authenticateresponse`、`x-grok-client-*` 與 request metadata；downstream 只能傳 conversation/session/turn/agent/deployment tracking 欄位，不能覆寫 auth、client identity、routed model 或 credential user identity。
 - Imagine 不屬於 inference profile：`Client.GenerateImage` 依 profile 直連 OpenAI `https://api.openai.com/v1/images/generations` 或 xAI `https://api.x.ai/v1/images/generations`；xAI OAuth bearer 具 `api:access` scope，OpenAI OAuth 仍使用 Codex profile 且不提供圖片 endpoint。request/response JSON 不進 `model.Format` 或 transform matrix。
+- Image Edit 是獨立的 OpenAI-compatible multipart surface：`POST /v1/images/edits` 由 `HandleImageEdits` 驗證 `model` / `prompt` / `image`，保留原始 multipart body，並由 `Client.EditImage` 以 `openai-api` profile 轉送到 `https://api.openai.com/v1/images/edits`；不把 uploaded image 寫入 log 或 transform matrix。
 - image generation 使用獨立 HTTP client，總 timeout `300s`、response-header timeout `240s`，避免 Imagine 在 server-side buffer 圖片期間被一般 messages timeout 切斷。
 - `proxy image-mcp` 是 client-side `stdio MCP` adapter：以 `PROXY_IMAGE_BASE_URL` / `PROXY_IMAGE_PORT` / `PROXY_IMAGE_API_KEY` 連回本 proxy，固定要求 `b64_json`，驗證實際圖片 MIME 後同時回 MCP image content 與專案內檔案路徑。
 - Codex 與 Claude Code 共用 `mcpimage` server，不共用 manifest：Codex manifest 以 `env_vars` 轉送 parent environment；Claude Code `.mcp.json` 以 `${user_config.*}` 注入安裝設定。Plugin 只依賴 PATH 中的 `proxy` binary，不複製或內嵌另一份 transport 實作。
@@ -127,6 +129,7 @@ proxy/
 | HTTP 公開介面 (HTTP Surface)            | `handlers` (`Server` / `middleware` / `observability`)                                    | `Server.New(cfg).Run(ctx)`                                                        |
 | 請求生命週期 (Request Lifecycle)        | `handlers/handler.go`, `handlers/codex_log.go`, `handlers/upstream_error_log.go`          | `Handler.Handle(format)`, `Handler.HandleModels`                                  |
 | 圖片生成 (Image Generation)             | `handlers/image_generation.go`, `svc/upstream/client.go`, `svc/upstream/profile.go`       | `Handler.HandleImageGenerations` → `Client.GenerateImage`                         |
+| 圖片編輯 (Image Edit)                   | `handlers/image_edit.go`, `svc/upstream/client.go`, `svc/upstream/profile.go`              | `Handler.HandleImageEdits` → `Client.EditImage`                                    |
 | 圖片 MCP 接入 (Image MCP Integration)   | `mcpimage`, `cmd/image_mcp.go`, `plugins/proxy-imagegen`                                  | `proxy image-mcp` → `generate_image`                                              |
 | 即時語音傳輸 (Realtime Voice Transport) | `handlers/realtime.go`, `svc/upstream/realtime.go`                                        | `RealtimeHandler.HandleWebSocket`, `HandleHandshake`                              |
 | 設定與生命週期 (Config & Lifecycle)     | `config`, `cmd`, `main`, `ecosystem.config.js`                                            | `cmd.ProxyCmd.RunE`                                                               |

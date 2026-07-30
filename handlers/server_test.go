@@ -42,6 +42,21 @@ func TestNewServerWiresImageGenerationRoute(t *testing.T) {
 	assert.True(t, found)
 }
 
+func TestNewServerWiresImageEditRoute(t *testing.T) {
+	server, err := New(testProxyConfig(t))
+	require.NoError(t, err)
+
+	var found bool
+	for _, route := range server.engine.Routes() {
+		if route.Method == http.MethodPost && route.Path == "/v1/images/edits" {
+			found = true
+			break
+		}
+	}
+
+	assert.True(t, found)
+}
+
 func TestNewServerRejectsInvalidConfiguration(t *testing.T) {
 	cfg := testProxyConfig(t)
 	cfg.BodyLimit = 0

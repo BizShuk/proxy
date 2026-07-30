@@ -151,6 +151,51 @@ func (c *Client) GenerateImage(
 	)
 }
 
+// EditImage sends an OpenAI-compatible multipart image-edit request to the
+// image-edit endpoint declared by the selected profile. The multipart body is
+// preserved byte-for-byte so boundaries and uploaded image bytes remain intact.
+func (c *Client) EditImage(
+	ctx context.Context,
+	profile Profile,
+	cred *authmodel.Credential,
+	envelope model.RequestEnvelope,
+) (*http.Response, error) {
+	if strings.TrimSpace(profile.ImageEditBaseURL) == "" ||
+		strings.TrimSpace(profile.ImageEditEndpoint) == "" {
+		return nil, &model.ProxyError{
+			Kind:    model.ERROR_UNSUPPORTED_FEATURE,
+			Status:  http.StatusNotImplemented,
+			Code:    "image_edit_unsupported",
+			Message: fmt.Sprintf("profile %q does not support image editing", profile.ID),
+		}
+	}
+	if err := validateCredentialForProfile(profile, cred); err != nil {
+		return nil, err
+	}
+
+	imageProfile := profile
+	imageProfile.BaseURL = profile.ImageEditBaseURL
+	imageCredential := *cred
+	if imageCredential.Kind == authmodel.KIND_OAUTH {
+		imageCredential.BaseURL = ""
+	}
+	var imageHTTPClient *http.Client
+	if c != nil {
+		imageHTTPClient = c.imageHTTPClient
+	}
+	return c.doWithHTTPClient(
+		imageHTTPClient,
+		ctx,
+		imageProfile,
+		&imageCredential,
+		envelope,
+		profile.ImageEditEndpoint,
+		IMAGE_GENERATION_TIMEOUT,
+		false,
+		true,
+	)
+}
+
 func (c *Client) do(
 	ctx context.Context,
 	profile Profile,
@@ -203,7 +248,11 @@ func (c *Client) doWithHTTPClient(
 		cancel()
 		return nil, unavailableUpstreamError("create upstream request", err)
 	}
-	request.Header.Set("Content-Type", "application/json")
+	contentType := strings.TrimSpace(envelope.ContentType)
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	request.Header.Set("Content-Type", contentType)
 	if stream {
 		request.Header.Set("Accept", "text/event-stream")
 	}

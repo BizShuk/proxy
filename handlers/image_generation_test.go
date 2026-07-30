@@ -184,6 +184,7 @@ func newImageHandlerForCredential(
 		profile, ok := defaultCatalog.Lookup(profileID)
 		require.True(t, ok)
 		profile.ImageGenerationBaseURL = imageBaseURL
+		profile.ImageEditBaseURL = imageBaseURL
 		imageProfiles = append(imageProfiles, profile)
 	}
 	imageCatalog, err := upstream.NewCatalog(imageProfiles)

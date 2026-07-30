@@ -10,6 +10,13 @@
 | 圖片輸出目錄 | Image output directory | 生成圖片的儲存位置；相對路徑必須位於 MCP client 的目前專案內 | `mcpimage/config.go:ENV_OUTPUT_DIR`、`mcpimage/tool.go:resolveOutputDir` |
 | Proxy 圖片 API key | Proxy image API key | MCP server 呼叫本 proxy 時放入 `Authorization: Bearer` 的 downstream API key，不是直接交給上游 provider 的 credential | `mcpimage/config.go:ENV_API_KEY`、`mcpimage/client.go:ProxyClient.Generate` |
 
+## 圖片編輯 (Image Edit)
+
+| 術語 (Term) | 英文 (English) | 定義 (Definition) | 出處 (Source) |
+| --- | --- | --- | --- |
+| 圖片編輯端點 | Image Edits endpoint | Proxy 對外提供的 OpenAI-compatible `POST /v1/images/edits` multipart HTTP 介面 | `handlers/server.go`、`handlers/image_edit.go` |
+| Personal Image | Personal image | downstream 上傳、只在 request lifecycle 內轉送給 Image Edit provider 的 JPEG/PNG/WebP image part | `handlers/image_edit.go`、`svc/upstream/client.go` |
+
 ## 縮寫 (Abbreviations)
 
 | 縮寫 | 全稱 | 說明 |

@@ -9,6 +9,7 @@ type RequestEnvelope struct {
 	Model        string
 	Stream       bool
 	Headers      http.Header
+	ContentType  string
 	Body         []byte
 }
 

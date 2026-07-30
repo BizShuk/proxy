@@ -153,6 +153,7 @@ func (s *Server) registerRoutes() {
 		v1.POST("/messages", s.handler.Handle(model.FORMAT_ANTHROPIC_MESSAGES))
 		v1.POST("/messages/count_tokens", s.handler.HandleCountTokens())
 		v1.POST("/images/generations", s.handler.HandleImageGenerations())
+		v1.POST("/images/edits", s.handler.HandleImageEdits())
 		if s.realtime != nil {
 			v1.GET("/realtime", s.realtime.HandleWebSocket())
 			v1.POST("/realtime/calls", s.realtime.HandleHandshake(upstream.OPENAI_REALTIME_CALLS_ENDPOINT))

@@ -75,6 +75,8 @@ type Profile struct {
 	Endpoints                      map[model.Format]string
 	ImageGenerationBaseURL         string
 	ImageGenerationEndpoint        string
+	ImageEditBaseURL               string
+	ImageEditEndpoint              string
 	Preferred                      model.Format
 	AuthScheme                     AuthScheme
 	AllowedRequestHeaders          []string
@@ -286,6 +288,8 @@ func DefaultCatalog() (*Catalog, error) {
 			AllowedResponseHeaders:  slices.Clone(defaultResponseHeaders),
 			ImageGenerationBaseURL:  "https://api.openai.com",
 			ImageGenerationEndpoint: "/v1/images/generations",
+			ImageEditBaseURL:        "https://api.openai.com",
+			ImageEditEndpoint:       "/v1/images/edits",
 			AdvertisedModels:        []string{"gpt-", "o1-", "o3-"},
 			NormalizeRequest:        preserveRequest,
 		},
