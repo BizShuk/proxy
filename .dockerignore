@@ -1,0 +1,5 @@
+.git
+.env
+settings.json
+settings.local.json
+tmp
