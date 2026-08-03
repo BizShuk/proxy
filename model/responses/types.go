@@ -27,6 +27,10 @@ func (c *ContentList) UnmarshalJSON(data []byte) error {
 	if len(trimmed) == 0 {
 		return fmt.Errorf("responses content: empty JSON")
 	}
+	if bytes.Equal(trimmed, []byte("null")) {
+		*c = nil
+		return nil
+	}
 	if trimmed[0] == '"' {
 		var text string
 		if err := json.Unmarshal(trimmed, &text); err != nil {
@@ -48,16 +52,17 @@ func (c *ContentList) UnmarshalJSON(data []byte) error {
 
 // InputItem is one Responses request input item.
 type InputItem struct {
-	ID               string      `json:"id,omitempty"`
-	Type             string      `json:"type,omitempty"`
-	Role             string      `json:"role,omitempty"`
-	Content          ContentList `json:"content,omitempty"`
-	Summary          ContentList `json:"summary,omitempty"`
-	EncryptedContent string      `json:"encrypted_content,omitempty"`
-	CallID           string      `json:"call_id,omitempty"`
-	Name             string      `json:"name,omitempty"`
-	Arguments        string      `json:"arguments,omitempty"`
-	Output           string      `json:"output,omitempty"`
+	ID               string       `json:"id,omitempty"`
+	Type             string       `json:"type,omitempty"`
+	Role             string       `json:"role,omitempty"`
+	Content          ContentList  `json:"content,omitempty"`
+	Summary          *ContentList `json:"summary,omitempty"`
+	EncryptedContent string       `json:"encrypted_content,omitempty"`
+	Status           string       `json:"status,omitempty"`
+	CallID           string       `json:"call_id,omitempty"`
+	Name             string       `json:"name,omitempty"`
+	Arguments        string       `json:"arguments,omitempty"`
+	Output           string       `json:"output,omitempty"`
 }
 
 // Tool defines one Responses tool.
@@ -155,16 +160,49 @@ func DecodeInput(raw json.RawMessage) ([]InputItem, error) {
 	if trimmed[0] != '[' {
 		return nil, fmt.Errorf("decode responses input: expected string or array")
 	}
-	var items []InputItem
-	if err := json.Unmarshal(trimmed, &items); err != nil {
+	var rawItems []json.RawMessage
+	if err := json.Unmarshal(trimmed, &rawItems); err != nil {
 		return nil, fmt.Errorf("decode responses input items: %w", err)
 	}
-	for index := range items {
+	items := make([]InputItem, len(rawItems))
+	for index, rawItem := range rawItems {
+		if err := validateReasoningSummary(index, rawItem); err != nil {
+			return nil, fmt.Errorf("decode responses input items: %w", err)
+		}
+		if err := json.Unmarshal(rawItem, &items[index]); err != nil {
+			return nil, fmt.Errorf("decode responses input item[%d]: %w", index, err)
+		}
 		if items[index].Type == "" && items[index].Role != "" {
 			items[index].Type = "message"
 		}
 	}
 	return items, nil
+}
+
+func validateReasoningSummary(index int, raw json.RawMessage) error {
+	var variant struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &variant); err != nil {
+		return fmt.Errorf("input[%d]: %w", index, err)
+	}
+	if variant.Type != "reasoning" {
+		return nil
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return fmt.Errorf("input[%d]: %w", index, err)
+	}
+	summary, exists := fields["summary"]
+	if !exists {
+		return fmt.Errorf("input[%d].summary is required for reasoning item", index)
+	}
+	trimmed := bytes.TrimSpace(summary)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return fmt.Errorf("input[%d].summary must be an array", index)
+	}
+	return nil
 }
 
 // DecodeRequest decodes and validates a Responses request.

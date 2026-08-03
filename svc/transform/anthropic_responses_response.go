@@ -88,9 +88,7 @@ func ResponsesToAnthropicResponse(ctx context.Context, envelope model.ResponseEn
 			for _, summary := range item.Summary {
 				parts = append(parts, summary.Text)
 			}
-			signature, err := encodeResponsesReasoningSignature(responsesReasoningSignature{
-				ID: item.ID, EncryptedContent: item.EncryptedContent,
-			})
+			signature, err := encodeResponsesReasoningSignature(responsesReasoningSignatureFromOutputItem(item))
 			if err != nil {
 				return model.TransformResult{}, protocolFailure(err)
 			}

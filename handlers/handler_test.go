@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -412,6 +413,32 @@ func TestHandlerRejectsMalformedAndUnknownRequestsBeforeUpstream(t *testing.T) {
 			assert.Contains(t, response.Body.String(), tc.wantCode)
 		})
 	}
+}
+
+func TestHandlerRejectsInvalidResponsesReasoningBeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var upstreamCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	handler := newHandlerForCredential(t, apiKeyCred("openai", server.URL), server.Client())
+	router := gin.New()
+	router.POST("/model", handler.Handle(model.FORMAT_OPENAI_RESPONSES))
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/model", strings.NewReader(`{
+		"model":"openai/gpt-5",
+		"input":[{"type":"reasoning","summary":null,"encrypted_content":"encrypted"}]
+	}`))
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	assert.Contains(t, response.Body.String(), `"code":"invalid_request"`)
+	assert.Contains(t, response.Body.String(), "input[0].summary")
+	assert.Zero(t, upstreamCalls.Load())
 }
 
 func TestHandlerEnforcesRequestAndUpstreamBodyLimits(t *testing.T) {

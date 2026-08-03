@@ -96,6 +96,7 @@ func (c *anthropicCollector) Push(ctx context.Context, frame model.SSEFrame) err
 				Type        string `json:"type"`
 				Text        string `json:"text"`
 				Thinking    string `json:"thinking"`
+				Signature   string `json:"signature"`
 				PartialJSON string `json:"partial_json"`
 			} `json:"delta"`
 		}
@@ -111,6 +112,8 @@ func (c *anthropicCollector) Push(ctx context.Context, frame model.SSEFrame) err
 			block.Text += payload.Delta.Text
 		case "thinking_delta":
 			block.Thinking += payload.Delta.Thinking
+		case "signature_delta":
+			block.Signature += payload.Delta.Signature
 		case "input_json_delta":
 			builder := c.toolArguments[payload.Index]
 			if builder == nil {

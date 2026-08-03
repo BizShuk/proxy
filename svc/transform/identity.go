@@ -165,7 +165,7 @@ func dataType(data []byte) string {
 func invalidRequestError(err error) error {
 	return &model.ProxyError{
 		Kind: model.ERROR_INVALID_REQUEST, Status: http.StatusBadRequest,
-		Code: "invalid_request", Message: "invalid request", Cause: err,
+		Code: "invalid_request", Message: "invalid request: " + err.Error(), Cause: err,
 	}
 }
 

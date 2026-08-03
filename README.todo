@@ -3,6 +3,19 @@
 - [ ] move realtime to agentsdk
 - [ ] claude /fork can't read the AGENTSDK_PROXY_API_KEY
 
+## Responses Reasoning Replay
+
+規則：stateless Responses replay 必須保留 reasoning item 的必要欄位；空 reasoning
+summary 必須編碼為 `summary: []`，由
+`TestAnthropicToResponsesPreservesEmptyReasoningSummary` 鎖定。
+
+- [x] 最小修正：讓 `responses.InputItem.Summary` 在 encoding 時區分 absent 與 present-empty，並在 Anthropic 空 `thinking` 轉換時保留 `summary: []`
+- [x] 在 `responses.DecodeInput` 加入 presence-aware variant validation；`type: reasoning` 缺少、為 `null` 或不是 array 的 `summary` 應在 proxy 內回報帶 `input[index].summary` 的 invalid-request error，不送 upstream
+- [x] 擴充 reasoning round-trip test matrix：empty/non-empty summary × streaming/non-streaming × `openai-api`/`openai-codex-oauth` normalizer，並斷言 message/function item 不會多出 `summary`
+- [x] 新增 handler-level two-turn regression test：mock upstream 首輪回傳 `summary: []` + `encrypted_content` + function call，次輪收到 Anthropic tool result 時必須送出合法 reasoning replay 並完成 2xx
+- [x] 稽核 Responses reasoning replay 的完整欄位集合；若 `status`、`content` 或新 opaque fields 必須跨 Anthropic transport 保存，升級 versioned signature envelope 並保持 v1 decode compatibility
+- [ ] Review 後 build/install 新 binary、以 `pm2 task restart "LLM Proxy"` 部署，再執行 opt-in `gpt-5.6-sol` tool-loop live acceptance；確認不再出現 `missing_required_parameter`，並保留舊 binary 作 rollback
+
 ## GPT Realtime Voice
 
 - [ ] Add isolated WebSocket upgrade and WebRTC handshake integration tests

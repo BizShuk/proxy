@@ -353,9 +353,7 @@ func (s *responsesToAnthropicStream) finishOutputItem(item responses.OutputItem)
 		if err != nil {
 			return nil, err
 		}
-		signature, err := encodeResponsesReasoningSignature(responsesReasoningSignature{
-			ID: item.ID, EncryptedContent: item.EncryptedContent,
-		})
+		signature, err := encodeResponsesReasoningSignature(responsesReasoningSignatureFromOutputItem(item))
 		if err != nil {
 			return nil, err
 		}

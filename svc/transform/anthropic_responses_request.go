@@ -178,11 +178,18 @@ func task5AnthropicInput(messages []anthropic.Message) ([]responses.InputItem, [
 				if err != nil {
 					return nil, nil, task5InvalidRequest("decode Responses reasoning signature", err)
 				}
-				item := responses.InputItem{
-					ID: metadata.ID, Type: "reasoning", EncryptedContent: metadata.EncryptedContent,
+				summary := responses.ContentList{}
+				if metadata.Summary != nil {
+					summary = cloneResponsesContentList(*metadata.Summary)
+				} else if block.Thinking != "" {
+					summary = append(summary, responses.Content{Type: "summary_text", Text: block.Thinking})
 				}
-				if block.Thinking != "" {
-					item.Summary = responses.ContentList{{Type: "summary_text", Text: block.Thinking}}
+				item := responses.InputItem{
+					ID: metadata.ID, Type: "reasoning", Summary: &summary,
+					EncryptedContent: metadata.EncryptedContent, Status: metadata.Status,
+				}
+				if metadata.Content != nil {
+					item.Content = cloneResponsesContentList(*metadata.Content)
 				}
 				items = append(items, item)
 				if block.Signature != "" && !recognized {

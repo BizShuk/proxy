@@ -270,7 +270,7 @@ xai-messages/grok-4.5                     → xai (強制走 Messages)
 | `xai` OAuth | `xai-grok-oauth` | `https://cli-chat-proxy.grok.com/v1` | Responses、Chat Completions、Messages |
 
 - OAuth Responses endpoint：`/responses`；缺少 `store` 時補 `false`，並確保 `include` 含 `reasoning.encrypted_content`。
-- Anthropic Messages 與 Responses 之間的 reasoning history 保留原始順序與 `id` / `summary` / `encrypted_content`；opaque metadata 透過版本化 `thinking.signature`（串流為 `signature_delta`）交給 Claude Code 往返，避免 tool loop 第二輪遺失 Grok reasoning state。
+- Anthropic Messages 與 Responses 之間的 reasoning history 保留原始順序與 `id` / `summary` / `content` / `encrypted_content` / `status`；opaque metadata 透過 v2 `thinking.signature`（串流為 `signature_delta`）交給 Claude Code 往返，並相容既有 v1 signature decode，避免 tool loop 第二輪遺失 Grok reasoning state。
 - OAuth Chat endpoint：`/chat/completions`；串流時補 `stream_options.include_usage=true`。
 - OAuth Messages endpoint：`/messages`；`max_tokens` 缺少或為 `0` 時補 `128000`。
 - OAuth request 固定注入 `X-XAI-Token-Auth: xai-grok-cli`、`x-authenticateresponse: authenticate-response`、`x-grok-client-*` 與 request metadata；`x-grok-model-override` 由實際 routed model 產生，不能由 downstream spoof。

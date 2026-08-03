@@ -118,7 +118,42 @@ func TestAnthropicToResponsesPreservesThinkingAsReasoningInput(t *testing.T) {
 	assert.Equal(t, "function_call_output", input[2]["type"])
 }
 
-func TestResponsesReasoningRoundTripPreservesMetadata(t *testing.T) {
+func TestAnthropicToResponsesPreservesEmptyReasoningSummary(t *testing.T) {
+	signature, err := encodeResponsesReasoningSignature(responsesReasoningSignature{
+		ID: "reasoning_1", EncryptedContent: "encrypted-reasoning",
+	})
+	require.NoError(t, err)
+
+	body, err := anthropic.Encode(anthropic.Request{
+		Model: "gpt-5.6-sol",
+		Messages: []anthropic.Message{{
+			Role: "assistant",
+			Content: anthropic.ContentList{{
+				Type: "thinking", Signature: signature,
+			}},
+		}},
+	})
+	require.NoError(t, err)
+
+	result, err := AnthropicToResponsesRequest(context.Background(), model.RequestEnvelope{
+		Model: "gpt-5.6-sol", Stream: true, Body: body,
+	})
+	require.NoError(t, err)
+
+	request, err := responses.DecodeRequest(result.Body)
+	require.NoError(t, err)
+	var input []map[string]any
+	require.NoError(t, json.Unmarshal(request.Input, &input))
+	require.Len(t, input, 1)
+	assert.Equal(t, "reasoning", input[0]["type"])
+	assert.Equal(t, "reasoning_1", input[0]["id"])
+	assert.Equal(t, "encrypted-reasoning", input[0]["encrypted_content"])
+	summary, exists := input[0]["summary"]
+	require.True(t, exists, "Responses reasoning input requires summary even when it is empty")
+	assert.Equal(t, []any{}, summary)
+}
+
+func TestResponsesReasoningRoundTripPreservesCompleteReplayItem(t *testing.T) {
 	responseBody := []byte(`{
 		"id":"resp_1",
 		"object":"response",
@@ -128,8 +163,13 @@ func TestResponsesReasoningRoundTripPreservesMetadata(t *testing.T) {
 			{
 				"id":"reasoning_1",
 				"type":"reasoning",
-				"summary":[{"type":"summary_text","text":"I should inspect the workspace."}],
-				"encrypted_content":"encrypted-reasoning"
+				"summary":[
+					{"type":"summary_text","text":"I should inspect."},
+					{"type":"summary_text","text":"Then use the tool."}
+				],
+				"content":[{"type":"reasoning_text","text":"opaque reasoning text"}],
+				"encrypted_content":"encrypted-reasoning",
+				"status":"incomplete"
 			},
 			{
 				"id":"fc_1",
@@ -177,8 +217,13 @@ func TestResponsesReasoningRoundTripPreservesMetadata(t *testing.T) {
 	assert.Equal(t, "reasoning_1", input[0]["id"])
 	assert.Equal(t, "encrypted-reasoning", input[0]["encrypted_content"])
 	assert.Equal(t, []any{
-		map[string]any{"type": "summary_text", "text": "I should inspect the workspace."},
+		map[string]any{"type": "summary_text", "text": "I should inspect."},
+		map[string]any{"type": "summary_text", "text": "Then use the tool."},
 	}, input[0]["summary"])
+	assert.Equal(t, []any{
+		map[string]any{"type": "reasoning_text", "text": "opaque reasoning text"},
+	}, input[0]["content"])
+	assert.Equal(t, "incomplete", input[0]["status"])
 	assert.Equal(t, "function_call", input[1]["type"])
 	assert.Equal(t, "function_call_output", input[2]["type"])
 }

@@ -91,6 +91,7 @@ func TestResponsesToAnthropicStreamPreservesReasoningMetadataInSignature(t *test
 				"id":"reasoning_1",
 				"type":"reasoning",
 				"summary":[{"type":"summary_text","text":"I should inspect the workspace."}],
+				"content":[{"type":"reasoning_text","text":"opaque reasoning text"}],
 				"encrypted_content":"encrypted-reasoning",
 				"status":"completed"
 			}
@@ -125,6 +126,15 @@ func TestResponsesToAnthropicStreamPreservesReasoningMetadataInSignature(t *test
 	require.True(t, recognized)
 	assert.Equal(t, "reasoning_1", metadata.ID)
 	assert.Equal(t, "encrypted-reasoning", metadata.EncryptedContent)
+	assert.Equal(t, "completed", metadata.Status)
+	require.NotNil(t, metadata.Summary)
+	assert.Equal(t, responses.ContentList{{
+		Type: "summary_text", Text: "I should inspect the workspace.",
+	}}, *metadata.Summary)
+	require.NotNil(t, metadata.Content)
+	assert.Equal(t, responses.ContentList{{
+		Type: "reasoning_text", Text: "opaque reasoning text",
+	}}, *metadata.Content)
 }
 
 func TestAnthropicToResponsesStreamLifecycle(t *testing.T) {
