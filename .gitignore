@@ -429,3 +429,5 @@ plans/draft.md
 # Submodule artifacts (本專案使用 git submodule)
 
 .md-tree-highlight/
+
+bin/

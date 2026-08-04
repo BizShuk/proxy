@@ -1,10 +1,16 @@
 {
   "name": "proxy",
+  "version": "0.0.0",
   "private": true,
+  "description": "通用 LLM 協定轉譯代理 (Generic LLM Protocol Translation Proxy)：多協定路由、多帳號 OAuth 轉發與圖片生成",
   "scripts": {
-    "build": "go build ./...",
+    "dev": "go run .",
     "test": "go test ./... -count=1 -timeout=180s",
-    "vet": "go vet ./...",
-    "verify": "npm run test && npm run build && npm run vet"
+    "build": "go build -o bin/proxy .",
+    "deploy": "go install .",
+    "lint": "gofmt -l . && go vet ./...",
+    "clean": "rm -rf bin",
+    "destroy": "pm2 delete \"LLM Proxy\"",
+    "ci": "npm run lint && npm run test && npm run build"
   }
 }
