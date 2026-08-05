@@ -2,13 +2,19 @@
 package upstream
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 
+	sdkanthropic "github.com/bizshuk/agentsdk/provider/anthropic"
 	ag "github.com/bizshuk/agentsdk/provider/antigravity"
+	sdkcodex "github.com/bizshuk/agentsdk/provider/codex"
+	sdkgoogle "github.com/bizshuk/agentsdk/provider/google"
+	sdkgrok "github.com/bizshuk/agentsdk/provider/grok"
+	sdkminimax "github.com/bizshuk/agentsdk/provider/minimax"
 	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/model/anthropic"
@@ -17,31 +23,49 @@ import (
 	"github.com/bizshuk/proxy/svc/route"
 )
 
+// Provider wire facts — base URLs, endpoint paths, identity headers, client
+// versions — are NOT declared here. They belong to the agentsdk provider
+// package for that vendor and are referenced from it (ag.*, anthropic.*,
+// codex.*, grok.*, ...). A constant only earns a place in this file when it
+// is something the proxy itself decides.
 const (
-	// ANTHROPIC_OAUTH_BETA is required for Anthropic OAuth requests.
-	ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20"
-	// DEFAULT_CODEX_ORIGINATOR identifies requests made through the Codex profile.
-	DEFAULT_CODEX_ORIGINATOR = "codex_cli_rs"
-	// DEFAULT_CODEX_VERSION is the Codex compatibility version sent upstream.
-	// Must be >= the version Codex upstream enforces for newer models
-	// (e.g., gpt-5.6-sol returns 400 if version is too old).
-	DEFAULT_CODEX_VERSION = "0.144.1"
+	// Catalog keys. These name rows in DefaultCatalog, not anything on the
+	// wire, so they stay proxy-owned even where the string coincides with a
+	// vendor name.
+	XAI_GROK_OAUTH_PROFILE_ID = "xai-grok-oauth"
+	ANTIGRAVITY_PROFILE_ID    = "antigravity"
 
-	ANTHROPIC_VERSION            = "2023-06-01"
-	XAI_GROK_OAUTH_PROFILE_ID    = "xai-grok-oauth"
-	XAI_GROK_OAUTH_BASE_URL      = "https://cli-chat-proxy.grok.com/v1"
-	OPENAI_IMAGE_DEFAULT_MODEL   = "gpt-image-2"
-	XAI_GROK_IMAGE_DEFAULT_MODEL = "grok-imagine-image-quality"
-	XAI_GROK_DEFAULT_MAX_TOKENS  = 128_000
-	XAI_GROK_ENCRYPTED_REASONING = "reasoning.encrypted_content"
+	// CLIENT_IDENTIFIER is how this proxy names itself to gateways that
+	// attribute traffic by client. It is deliberately not the reference
+	// CLI's name: impersonating it would misreport who is calling.
+	CLIENT_IDENTIFIER = "proxy"
 
-	XAI_GROK_TOKEN_AUTH_HEADER            = "X-XAI-Token-Auth"
-	XAI_GROK_TOKEN_AUTH_VALUE             = "xai-grok-cli"
-	XAI_GROK_AUTHENTICATE_RESPONSE_HEADER = "x-authenticateresponse"
-	XAI_GROK_AUTHENTICATE_RESPONSE_VALUE  = "authenticate-response"
-	DEFAULT_XAI_GROK_CLIENT_VERSION       = "0.2.112"
-	DEFAULT_XAI_GROK_CLIENT_IDENTIFIER    = "proxy"
-	DEFAULT_XAI_GROK_CLIENT_MODE          = "headless"
+	// OPENAI_IMAGE_DEFAULT_MODEL is the proxy's default for OpenAI image
+	// generation. OpenAI's public API has no agentsdk adapter (codex covers
+	// only the OAuth Responses surface), so this choice has no upstream
+	// owner to defer to.
+	OPENAI_IMAGE_DEFAULT_MODEL = "gpt-image-2"
+)
+
+// OpenAI public-API surface. agentsdk models the Codex OAuth endpoint but
+// not api.openai.com, so these paths have no provider package to live in
+// yet. Move them out the day an `openai` adapter lands.
+const (
+	OPENAI_API_BASE_URL        = "https://api.openai.com"
+	OPENAI_PATH_RESPONSES      = "/v1/responses"
+	OPENAI_PATH_CHAT           = "/v1/chat/completions"
+	OPENAI_PATH_IMAGE_GENERATE = "/v1/images/generations"
+	OPENAI_PATH_IMAGE_EDIT     = "/v1/images/edits"
+
+	// OPENAI_COMPAT_PATH_CHAT is the Chat Completions path as served by
+	// OpenAI-compatible surfaces that carry their own version prefix in the
+	// base URL (Google AI Studio's /v1beta/openai root, for example).
+	OPENAI_COMPAT_PATH_CHAT = "/chat/completions"
+
+	// RESPONSES_ENCRYPTED_REASONING is an `include` value of the Responses
+	// protocol, which this proxy owns in model/responses — not a vendor
+	// extension.
+	RESPONSES_ENCRYPTED_REASONING = "reasoning.encrypted_content"
 )
 
 var codexResponsesLiteModels = map[string]struct{}{
@@ -67,6 +91,13 @@ type NormalizedRequest struct {
 // NormalizeRequest applies provider-specific requirements after protocol transforms.
 type NormalizeRequest func(model.RequestEnvelope) (NormalizedRequest, error)
 
+// ApplyCredentialBody fills in request fields that only the credential can
+// supply, for providers whose wire format carries account state in the body
+// rather than in a header. It is the credential-aware sibling of
+// NormalizeRequest, which runs before the credential is resolved and therefore
+// cannot see it. Profiles that need nothing leave it nil.
+type ApplyCredentialBody func(context.Context, *authmodel.Credential, []byte) ([]byte, error)
+
 // Profile describes one concrete upstream API surface.
 type Profile struct {
 	ID                 string
@@ -78,20 +109,29 @@ type Profile struct {
 	// providers that split generation across two paths (Gemini's
 	// generateContent vs streamGenerateContent) need it; everyone else streams
 	// from the same endpoint and leaves this nil.
-	StreamEndpoints                map[model.Format]string
-	ImageGenerationBaseURL         string
-	ImageGenerationEndpoint        string
-	ImageEditBaseURL               string
-	ImageEditEndpoint              string
-	Preferred                      model.Format
-	AuthScheme                     AuthScheme
+	StreamEndpoints         map[model.Format]string
+	ImageGenerationBaseURL  string
+	ImageGenerationEndpoint string
+	ImageEditBaseURL        string
+	ImageEditEndpoint       string
+	Preferred               model.Format
+	AuthScheme              AuthScheme
+	// OAuthScheme overrides AuthScheme when the resolved credential is an
+	// OAuth one. Anthropic is the reason it exists: the same endpoint reads
+	// an API key from x-api-key but an access token from Authorization.
+	// Empty means the credential kind makes no difference.
+	OAuthScheme                    AuthScheme
 	AllowedRequestHeaders          []string
 	AllowedResponseHeaders         []string
 	AdvertisedModels               []string
-	AnthropicVersion               string
 	CountTokensEndpoint            string
 	AllowsMissingStreamContentType bool
 	NormalizeRequest               NormalizeRequest
+	ApplyCredentialBody            ApplyCredentialBody
+	// ApplyIdentityHeaders stamps the client-identity headers this gateway
+	// gates on beyond the credential. See identity.go — the transport calls
+	// it blindly so it never has to know which provider it is talking to.
+	ApplyIdentityHeaders ApplyIdentityHeaders
 }
 
 // ResolveEndpoint returns the fixed endpoint for a supported format.
@@ -266,23 +306,26 @@ func DefaultCatalog() (*Catalog, error) {
 			ID:                     "anthropic",
 			Routing:                route.Profile{ID: "anthropic", Qualifiers: []string{"anthropic"}, Prefixes: []string{"claude-"}},
 			CredentialProvider:     "anthropic",
-			BaseURL:                "https://api.anthropic.com",
-			Endpoints:              map[model.Format]string{model.FORMAT_ANTHROPIC_MESSAGES: "/v1/messages"},
+			BaseURL:                sdkanthropic.DefaultBaseURL,
+			Endpoints:              map[model.Format]string{model.FORMAT_ANTHROPIC_MESSAGES: sdkanthropic.PATH_MESSAGES},
 			Preferred:              model.FORMAT_ANTHROPIC_MESSAGES,
 			AuthScheme:             AUTH_X_API_KEY,
-			AllowedRequestHeaders:  append(slices.Clone(defaultRequestHeaders), "anthropic-beta"),
+			OAuthScheme:            AUTH_BEARER,
+			AllowedRequestHeaders:  append(slices.Clone(defaultRequestHeaders), sdkanthropic.OAuthBetaHeader),
 			AllowedResponseHeaders: slices.Clone(defaultResponseHeaders),
 			AdvertisedModels:       []string{"claude-"},
-			AnthropicVersion:       ANTHROPIC_VERSION,
-			CountTokensEndpoint:    "/v1/messages/count_tokens",
+			CountTokensEndpoint:    sdkanthropic.PATH_COUNT_TOKENS,
 			NormalizeRequest:       preserveRequest,
+			ApplyIdentityHeaders:   applyAnthropicIdentity,
 		},
 		{
-			ID:                     "minimax",
-			Routing:                route.Profile{ID: "minimax", Qualifiers: []string{"minimax"}, ExactModels: []string{"MiniMax-Text-01"}, Prefixes: []string{"minimax-"}},
-			CredentialProvider:     "minimax",
-			BaseURL:                "https://api.minimax.io/anthropic",
-			Endpoints:              map[model.Format]string{model.FORMAT_ANTHROPIC_MESSAGES: "/v1/messages"},
+			ID:                 "minimax",
+			Routing:            route.Profile{ID: "minimax", Qualifiers: []string{"minimax"}, ExactModels: []string{"MiniMax-Text-01"}, Prefixes: []string{"minimax-"}},
+			CredentialProvider: "minimax",
+			BaseURL:            sdkminimax.DefaultBaseURL,
+			// MiniMax fronts an Anthropic-Messages-compatible surface, so the
+			// path is Anthropic's, not one of its own.
+			Endpoints:              map[model.Format]string{model.FORMAT_ANTHROPIC_MESSAGES: sdkanthropic.PATH_MESSAGES},
 			Preferred:              model.FORMAT_ANTHROPIC_MESSAGES,
 			AuthScheme:             AUTH_X_API_KEY,
 			AllowedRequestHeaders:  slices.Clone(defaultRequestHeaders),
@@ -294,19 +337,19 @@ func DefaultCatalog() (*Catalog, error) {
 			ID:                 "openai-api",
 			Routing:            route.Profile{ID: "openai", Qualifiers: []string{"openai", "openai-chat"}, Prefixes: []string{"gpt-", "o1-", "o3-"}},
 			CredentialProvider: "openai",
-			BaseURL:            "https://api.openai.com",
+			BaseURL:            OPENAI_API_BASE_URL,
 			Endpoints: map[model.Format]string{
-				model.FORMAT_OPENAI_RESPONSES: "/v1/responses",
-				model.FORMAT_OPENAI_CHAT:      "/v1/chat/completions",
+				model.FORMAT_OPENAI_RESPONSES: OPENAI_PATH_RESPONSES,
+				model.FORMAT_OPENAI_CHAT:      OPENAI_PATH_CHAT,
 			},
 			Preferred:               model.FORMAT_OPENAI_RESPONSES,
 			AuthScheme:              AUTH_BEARER,
 			AllowedRequestHeaders:   append(slices.Clone(defaultRequestHeaders), OPENAI_SAFETY_IDENTIFIER_HEADER),
 			AllowedResponseHeaders:  slices.Clone(defaultResponseHeaders),
-			ImageGenerationBaseURL:  "https://api.openai.com",
-			ImageGenerationEndpoint: "/v1/images/generations",
-			ImageEditBaseURL:        "https://api.openai.com",
-			ImageEditEndpoint:       "/v1/images/edits",
+			ImageGenerationBaseURL:  OPENAI_API_BASE_URL,
+			ImageGenerationEndpoint: OPENAI_PATH_IMAGE_GENERATE,
+			ImageEditBaseURL:        OPENAI_API_BASE_URL,
+			ImageEditEndpoint:       OPENAI_PATH_IMAGE_EDIT,
 			AdvertisedModels:        []string{"gpt-", "o1-", "o3-"},
 			NormalizeRequest:        preserveRequest,
 		},
@@ -314,8 +357,8 @@ func DefaultCatalog() (*Catalog, error) {
 			ID:                             "openai-codex-oauth",
 			Routing:                        route.Profile{ID: "openai", Qualifiers: []string{"openai", "openai-chat"}, Prefixes: []string{"gpt-", "o1-", "o3-"}},
 			CredentialProvider:             "openai",
-			BaseURL:                        "https://chatgpt.com/backend-api",
-			Endpoints:                      map[model.Format]string{model.FORMAT_OPENAI_RESPONSES: "/codex/responses"},
+			BaseURL:                        sdkcodex.DefaultBaseURL,
+			Endpoints:                      map[model.Format]string{model.FORMAT_OPENAI_RESPONSES: sdkcodex.PATH_RESPONSES},
 			Preferred:                      model.FORMAT_OPENAI_RESPONSES,
 			AuthScheme:                     AUTH_BEARER,
 			AllowedRequestHeaders:          slices.Clone(defaultRequestHeaders),
@@ -323,17 +366,19 @@ func DefaultCatalog() (*Catalog, error) {
 			AdvertisedModels:               []string{"gpt-", "o1-", "o3-"},
 			AllowsMissingStreamContentType: true,
 			NormalizeRequest:               normalizeCodexRequest,
+			ApplyIdentityHeaders:           applyCodexIdentity,
 		},
 		{
 			ID:                      "xai",
 			Routing:                 xaiRouting,
 			CredentialProvider:      "xai",
-			BaseURL:                 "https://api.x.ai",
-			ImageGenerationBaseURL:  "https://api.x.ai",
-			ImageGenerationEndpoint: "/v1/images/generations",
+			BaseURL:                 sdkgrok.APIBaseURL,
+			ImageGenerationBaseURL:  sdkgrok.IMAGE_BASE_URL,
+			ImageGenerationEndpoint: sdkgrok.IMAGE_PATH,
+			// xAI serves OpenAI-compatible dialects at OpenAI's own paths.
 			Endpoints: map[model.Format]string{
-				model.FORMAT_OPENAI_RESPONSES: "/v1/responses",
-				model.FORMAT_OPENAI_CHAT:      "/v1/chat/completions",
+				model.FORMAT_OPENAI_RESPONSES: OPENAI_PATH_RESPONSES,
+				model.FORMAT_OPENAI_CHAT:      OPENAI_PATH_CHAT,
 			},
 			Preferred:              model.FORMAT_OPENAI_RESPONSES,
 			AuthScheme:             AUTH_BEARER,
@@ -341,37 +386,39 @@ func DefaultCatalog() (*Catalog, error) {
 			AllowedResponseHeaders: slices.Clone(defaultResponseHeaders),
 			AdvertisedModels:       []string{"grok-"},
 			NormalizeRequest:       normalizeXAIRequest,
+			ApplyIdentityHeaders:   applyXAIIdentity,
 		},
 		{
 			ID:                      XAI_GROK_OAUTH_PROFILE_ID,
 			Routing:                 xaiRouting,
 			CredentialProvider:      "xai",
-			BaseURL:                 XAI_GROK_OAUTH_BASE_URL,
-			ImageGenerationBaseURL:  "https://api.x.ai",
-			ImageGenerationEndpoint: "/v1/images/generations",
+			BaseURL:                 sdkgrok.OAuthBaseURL,
+			ImageGenerationBaseURL:  sdkgrok.IMAGE_BASE_URL,
+			ImageGenerationEndpoint: sdkgrok.IMAGE_PATH,
 			Endpoints: map[model.Format]string{
-				model.FORMAT_OPENAI_RESPONSES:   "/responses",
-				model.FORMAT_OPENAI_CHAT:        "/chat/completions",
-				model.FORMAT_ANTHROPIC_MESSAGES: "/messages",
+				model.FORMAT_OPENAI_RESPONSES:   sdkgrok.OAUTH_PATH_RESPONSES,
+				model.FORMAT_OPENAI_CHAT:        sdkgrok.OAUTH_PATH_CHAT,
+				model.FORMAT_ANTHROPIC_MESSAGES: sdkgrok.OAUTH_PATH_MESSAGES,
 			},
 			Preferred:  model.FORMAT_OPENAI_RESPONSES,
 			AuthScheme: AUTH_BEARER,
 			AllowedRequestHeaders: append(slices.Clone(defaultRequestHeaders),
-				"x-grok-conv-id",
-				"x-grok-req-id",
-				"x-grok-session-id",
-				"x-grok-turn-idx",
-				"x-grok-agent-id",
-				"x-grok-deployment-id",
+				sdkgrok.ConversationIDHeader,
+				sdkgrok.RequestIDHeader,
+				sdkgrok.SessionIDHeader,
+				sdkgrok.TurnIndexHeader,
+				sdkgrok.AgentIDHeader,
+				sdkgrok.DeploymentIDHeader,
 			),
 			AllowedResponseHeaders: append(slices.Clone(defaultResponseHeaders),
-				"x-grok-context-window",
-				"x-grok-max-completion-tokens",
-				"x-models-etag",
-				"x-should-retry",
+				sdkgrok.ContextWindowHeader,
+				sdkgrok.MaxCompletionTokensHeader,
+				sdkgrok.ModelsETagHeader,
+				sdkgrok.ShouldRetryHeader,
 			),
-			AdvertisedModels: []string{"grok-"},
-			NormalizeRequest: normalizeXAIGrokOAuthRequest,
+			AdvertisedModels:     []string{"grok-"},
+			NormalizeRequest:     normalizeXAIGrokOAuthRequest,
+			ApplyIdentityHeaders: applyXAIGrokOAuthIdentity,
 		},
 		{
 			// Antigravity speaks Gemini generateContent wrapped in a routing
@@ -411,14 +458,16 @@ func DefaultCatalog() (*Catalog, error) {
 				"gemini-3.1-pro-high", "gemini-3.1-pro-low",
 				"gpt-oss-120b-medium",
 			},
-			NormalizeRequest: preserveRequest,
+			NormalizeRequest:     preserveRequest,
+			ApplyCredentialBody:  applyAntigravityCredentialBody,
+			ApplyIdentityHeaders: applyAntigravityIdentity,
 		},
 		{
 			ID:                 "google",
 			Routing:            route.Profile{ID: "google", Qualifiers: []string{"google", "google-chat"}, Prefixes: []string{"gemini-", "gemma-", "imagen-"}},
 			CredentialProvider: "google",
-			BaseURL:            "https://generativelanguage.googleapis.com/v1beta/openai",
-			Endpoints:          map[model.Format]string{model.FORMAT_OPENAI_CHAT: "/chat/completions"},
+			BaseURL:            sdkgoogle.DefaultBaseURL,
+			Endpoints:          map[model.Format]string{model.FORMAT_OPENAI_CHAT: OPENAI_COMPAT_PATH_CHAT},
 			Preferred:          model.FORMAT_OPENAI_CHAT,
 			AuthScheme:         AUTH_BEARER,
 			AllowedRequestHeaders: append(slices.Clone(defaultRequestHeaders),
@@ -573,7 +622,7 @@ func normalizeXAIGrokOAuthRequest(envelope model.RequestEnvelope) (NormalizedReq
 		if value, exists := body["store"]; !exists || value == nil {
 			body["store"] = false
 		}
-		if err := ensureJSONArrayContainsString(body, "include", XAI_GROK_ENCRYPTED_REASONING); err != nil {
+		if err := ensureJSONArrayContainsString(body, "include", RESPONSES_ENCRYPTED_REASONING); err != nil {
 			return NormalizedRequest{}, invalidRequestError("normalize xAI Grok OAuth Responses request", err)
 		}
 		if envelope.Stream {
@@ -598,7 +647,7 @@ func normalizeXAIGrokOAuthRequest(envelope model.RequestEnvelope) (NormalizedReq
 			return NormalizedRequest{}, invalidRequestError("normalize xAI Grok OAuth Messages request", err)
 		}
 		if request.MaxTokens == 0 {
-			body["max_tokens"] = XAI_GROK_DEFAULT_MAX_TOKENS
+			body["max_tokens"] = sdkgrok.DefaultMaxTokens
 		}
 		if envelope.Stream {
 			body["stream"] = true

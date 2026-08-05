@@ -3,8 +3,8 @@ module github.com/bizshuk/proxy
 go 1.26.0
 
 require (
-	github.com/bizshuk/agentsdk v0.0.46
-	github.com/bizshuk/auth v0.0.1
+	github.com/bizshuk/agentsdk v0.0.49
+	github.com/bizshuk/auth v0.0.2
 	github.com/bizshuk/gosdk v1.3.5
 	github.com/gin-gonic/gin v1.11.0
 	github.com/google/uuid v1.6.0

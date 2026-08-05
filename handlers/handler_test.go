@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sdkgrok "github.com/bizshuk/agentsdk/provider/grok"
 	"io"
 	"log/slog"
 	"net/http"
@@ -240,11 +241,11 @@ func successSSEForPath(path string) string {
 func assertXAIGrokOAuthUpstreamRequest(t *testing.T, headers http.Header, body []byte, path string) {
 	t.Helper()
 	assert.Equal(t, "Bearer test-access-token", headers.Get("Authorization"))
-	assert.Equal(t, upstream.XAI_GROK_TOKEN_AUTH_VALUE, headers.Get(upstream.XAI_GROK_TOKEN_AUTH_HEADER))
-	assert.Equal(t, upstream.XAI_GROK_AUTHENTICATE_RESPONSE_VALUE, headers.Get(upstream.XAI_GROK_AUTHENTICATE_RESPONSE_HEADER))
-	assert.Equal(t, upstream.DEFAULT_XAI_GROK_CLIENT_VERSION, headers.Get("x-grok-client-version"))
-	assert.Equal(t, upstream.DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, headers.Get("x-grok-client-identifier"))
-	assert.Equal(t, upstream.DEFAULT_XAI_GROK_CLIENT_MODE, headers.Get("x-grok-client-mode"))
+	assert.Equal(t, sdkgrok.TokenAuthValue, headers.Get(sdkgrok.TokenAuthHeader))
+	assert.Equal(t, sdkgrok.AuthenticateResponseValue, headers.Get(sdkgrok.AuthenticateResponseHeader))
+	assert.Equal(t, sdkgrok.ClientVersion, headers.Get("x-grok-client-version"))
+	assert.Equal(t, upstream.CLIENT_IDENTIFIER, headers.Get("x-grok-client-identifier"))
+	assert.Equal(t, sdkgrok.DefaultClientMode, headers.Get("x-grok-client-mode"))
 	assert.Equal(t, "grok-4.5", headers.Get("x-grok-model-override"))
 	assert.NotEmpty(t, headers.Get("x-grok-req-id"))
 	assert.NotEmpty(t, headers.Get("x-grok-conv-id"))
@@ -256,7 +257,7 @@ func assertXAIGrokOAuthUpstreamRequest(t *testing.T, headers http.Header, body [
 	switch path {
 	case "/responses":
 		assert.Equal(t, false, value["store"])
-		assert.Contains(t, value["include"], upstream.XAI_GROK_ENCRYPTED_REASONING)
+		assert.Contains(t, value["include"], upstream.RESPONSES_ENCRYPTED_REASONING)
 	case "/chat/completions":
 		if value["stream"] == true {
 			assert.Equal(t, true, value["stream_options"].(map[string]any)["include_usage"])

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	sdkgrok "github.com/bizshuk/agentsdk/provider/grok"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -45,7 +46,7 @@ func TestHandleImageGenerationsOAuthRoundTrip(t *testing.T) {
 	credential := &authmodel.Credential{
 		Provider: "xai", Kind: authmodel.KIND_OAUTH,
 		AccessToken: "xai-oauth-token", RefreshToken: "xai-refresh-token",
-		ExpiresAt: time.Now().Add(time.Hour), BaseURL: upstream.XAI_GROK_OAUTH_BASE_URL,
+		ExpiresAt: time.Now().Add(time.Hour), BaseURL: sdkgrok.OAuthBaseURL,
 	}
 	handler := newImageHandlerForCredential(t, credential, imageAPI.Client(), imageAPI.URL)
 	router := gin.New()
@@ -79,8 +80,8 @@ func TestHandleImageGenerationsOAuthRoundTrip(t *testing.T) {
 	assert.Equal(t, "/v1/images/generations", upstreamRequest.path)
 	assert.Equal(t, "Bearer xai-oauth-token", upstreamRequest.authorization)
 	assert.Equal(t, "image-request-1", upstreamRequest.headers.Get("x-request-id"))
-	assert.Empty(t, upstreamRequest.headers.Get(upstream.XAI_GROK_TOKEN_AUTH_HEADER))
-	assert.Empty(t, upstreamRequest.headers.Get(upstream.XAI_GROK_AUTHENTICATE_RESPONSE_HEADER))
+	assert.Empty(t, upstreamRequest.headers.Get(sdkgrok.TokenAuthHeader))
+	assert.Empty(t, upstreamRequest.headers.Get(sdkgrok.AuthenticateResponseHeader))
 	assert.Empty(t, upstreamRequest.headers.Get("x-grok-model-override"))
 	assert.JSONEq(t, string(requestBody), string(upstreamRequest.body))
 }

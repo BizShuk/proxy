@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bizshuk/proxy/svc/upstream"
+	sdkgrok "github.com/bizshuk/agentsdk/provider/grok"
 )
 
 const (
 	DEFAULT_BASE_URL        = "http://127.0.0.1"
 	DEFAULT_PORT            = 8317
-	DEFAULT_MODEL           = upstream.XAI_GROK_IMAGE_DEFAULT_MODEL
+	DEFAULT_MODEL           = sdkgrok.DefaultImageModel
 	DEFAULT_OUTPUT_DIR      = "images"
 	DEFAULT_REQUEST_TIMEOUT = 5 * time.Minute
 

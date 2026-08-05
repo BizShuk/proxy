@@ -86,7 +86,14 @@ func PrepareOpenAIRealtimeTarget(
 
 	headers := make(http.Header)
 	forwardAllowlistedHeaders(profile, sourceHeaders, headers)
-	applyProviderHeaders(profile, credential, headers)
+	applyCredentialHeader(profile, credential, headers)
+	if profile.ApplyIdentityHeaders != nil {
+		profile.ApplyIdentityHeaders(IdentityRequest{
+			Credential: credential,
+			Header:     headers,
+			Surface:    SURFACE_INFERENCE,
+		})
+	}
 	return RealtimeTarget{
 		URL:            parsedURL,
 		RequestHeaders: headers,

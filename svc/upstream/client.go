@@ -9,11 +9,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"runtime"
 	"strings"
 	"time"
 
-	ag "github.com/bizshuk/agentsdk/provider/antigravity"
 	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/proxy/model"
 )
@@ -27,12 +25,11 @@ const (
 
 // Client sends sanitized, context-bound requests to concrete provider profiles.
 type Client struct {
-	httpClient          *http.Client
-	imageHTTPClient     *http.Client
-	messagesTimeout     time.Duration
-	streamTimeout       time.Duration
-	countTokensTimeout  time.Duration
-	antigravityProjects *antigravityProjects
+	httpClient         *http.Client
+	imageHTTPClient    *http.Client
+	messagesTimeout    time.Duration
+	streamTimeout      time.Duration
+	countTokensTimeout time.Duration
 }
 
 // NewClient clones an injected HTTP client and applies proxy timeout policy.
@@ -73,12 +70,11 @@ func NewClient(httpClient *http.Client, cfg TimeoutConfig) (*Client, error) {
 	}
 
 	return &Client{
-		httpClient:          &clone,
-		imageHTTPClient:     &imageClone,
-		messagesTimeout:     time.Duration(cfg.MessagesMs) * time.Millisecond,
-		streamTimeout:       time.Duration(cfg.StreamMessagesMs) * time.Millisecond,
-		countTokensTimeout:  time.Duration(cfg.CountTokensMs) * time.Millisecond,
-		antigravityProjects: newAntigravityProjects(),
+		httpClient:         &clone,
+		imageHTTPClient:    &imageClone,
+		messagesTimeout:    time.Duration(cfg.MessagesMs) * time.Millisecond,
+		streamTimeout:      time.Duration(cfg.StreamMessagesMs) * time.Millisecond,
+		countTokensTimeout: time.Duration(cfg.CountTokensMs) * time.Millisecond,
 	}, nil
 }
 
@@ -99,26 +95,24 @@ func (c *Client) Do(ctx context.Context, profile Profile, cred *authmodel.Creden
 	return c.do(ctx, profile, cred, envelope, endpoint, timeout, envelope.Stream)
 }
 
-// applyCredentialBody fills in request fields that only the credential can
-// supply. Antigravity's envelope carries the caller's Cloud Code project, which
-// the protocol transform has no access to.
+// applyCredentialBody runs the profile's credential-aware body hook, for
+// providers whose wire format carries account state in the body rather than in
+// a header. Most profiles declare none and pass straight through.
 func (c *Client) applyCredentialBody(
 	ctx context.Context,
 	profile Profile,
 	cred *authmodel.Credential,
 	envelope model.RequestEnvelope,
 ) (model.RequestEnvelope, error) {
-	if profile.ID != ANTIGRAVITY_PROFILE_ID {
+	if profile.ApplyCredentialBody == nil {
 		return envelope, nil
 	}
+	// The hook reads the credential, so it must not run on one that failed
+	// validation — doWithHTTPClient's own check comes too late.
 	if err := validateCredentialForProfile(profile, cred); err != nil {
 		return model.RequestEnvelope{}, err
 	}
-	project, err := c.antigravityProjects.Resolve(ctx, cred)
-	if err != nil {
-		return model.RequestEnvelope{}, err
-	}
-	body, err := injectAntigravityProject(envelope.Body, project)
+	body, err := profile.ApplyCredentialBody(ctx, cred, envelope.Body)
 	if err != nil {
 		return model.RequestEnvelope{}, err
 	}
@@ -290,12 +284,19 @@ func (c *Client) doWithHTTPClient(
 	if stream {
 		request.Header.Set("Accept", "text/event-stream")
 	}
-	forwardAllowlistedHeaders(profile, envelope.Headers, request.Header)
-	applyProviderHeaders(profile, cred, request.Header)
+	surface := SURFACE_INFERENCE
 	if imageGeneration {
-		applyImageGenerationHeaders(profile, request.Header)
-	} else {
-		applyXAIGrokOAuthHeaders(profile, cred, envelope, request.Header)
+		surface = SURFACE_IMAGE
+	}
+	forwardAllowlistedHeaders(profile, envelope.Headers, request.Header)
+	applyCredentialHeader(profile, cred, request.Header)
+	if profile.ApplyIdentityHeaders != nil {
+		profile.ApplyIdentityHeaders(IdentityRequest{
+			Credential: cred,
+			Envelope:   envelope,
+			Header:     request.Header,
+			Surface:    surface,
+		})
 	}
 
 	response, err := httpClient.Do(request)
@@ -305,15 +306,6 @@ func (c *Client) doWithHTTPClient(
 	}
 	response.Body = &cancelReadCloser{ReadCloser: response.Body, cancel: cancel}
 	return response, nil
-}
-
-func applyImageGenerationHeaders(profile Profile, header http.Header) {
-	if !strings.EqualFold(profile.CredentialProvider, "xai") {
-		return
-	}
-	header.Set("x-grok-client-version", DEFAULT_XAI_GROK_CLIENT_VERSION)
-	header.Set("x-grok-client-identifier", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER)
-	header.Set("User-Agent", xaiGrokUserAgent())
 }
 
 func buildEndpointURL(baseURL, endpoint string) (string, error) {
@@ -383,83 +375,24 @@ func forwardAllowlistedHeaders(profile Profile, source, target http.Header) {
 	}
 }
 
-func applyProviderHeaders(profile Profile, cred *authmodel.Credential, header http.Header) {
+// applyCredentialHeader puts the credential secret in the header the profile
+// declares. This is the only auth the transport itself performs — anything a
+// gateway additionally demands is client identity and belongs to the
+// profile's ApplyIdentityHeaders hook.
+func applyCredentialHeader(profile Profile, cred *authmodel.Credential, header http.Header) {
 	secret := cred.APIKey
+	scheme := profile.AuthScheme
 	if cred.Kind == authmodel.KIND_OAUTH {
 		secret = cred.AccessToken
+		if profile.OAuthScheme != "" {
+			scheme = profile.OAuthScheme
+		}
 	}
-
-	if strings.EqualFold(profile.CredentialProvider, "anthropic") && cred.Kind == authmodel.KIND_OAUTH {
+	switch scheme {
+	case AUTH_X_API_KEY:
+		header.Set("x-api-key", secret)
+	case AUTH_BEARER:
 		header.Set("Authorization", "Bearer "+secret)
-		header.Set("anthropic-dangerous-direct-browser-access", "true")
-		ensureCommaSeparatedHeader(header, "anthropic-beta", ANTHROPIC_OAUTH_BETA)
-	} else {
-		switch profile.AuthScheme {
-		case AUTH_X_API_KEY:
-			header.Set("x-api-key", secret)
-		case AUTH_BEARER:
-			header.Set("Authorization", "Bearer "+secret)
-		}
-	}
-
-	if profile.AnthropicVersion != "" {
-		header.Set("anthropic-version", profile.AnthropicVersion)
-	}
-	if profile.ID == "openai-codex-oauth" {
-		header.Set("originator", DEFAULT_CODEX_ORIGINATOR)
-		header.Set("version", DEFAULT_CODEX_VERSION)
-		header.Set("User-Agent", codexUserAgent())
-		if strings.TrimSpace(cred.AccountID) != "" {
-			header.Set("ChatGPT-Account-ID", cred.AccountID)
-		}
-	}
-	if profile.ID == ANTIGRAVITY_PROFILE_ID {
-		// The Cloud Code gateway gates on IDE identity, not just the token.
-		header.Set("User-Agent", ag.UserAgent())
-		header.Set("X-Client-Name", ag.CLIENT_NAME)
-		header.Set("X-Client-Version", ag.ClientVersion)
-		header.Set("x-goog-api-client", ag.GOOG_API_CLIENT)
-	}
-}
-
-func applyXAIGrokOAuthHeaders(profile Profile, cred *authmodel.Credential, envelope model.RequestEnvelope, header http.Header) {
-	if profile.ID != XAI_GROK_OAUTH_PROFILE_ID {
-		return
-	}
-
-	header.Set(XAI_GROK_TOKEN_AUTH_HEADER, XAI_GROK_TOKEN_AUTH_VALUE)
-	header.Set(XAI_GROK_AUTHENTICATE_RESPONSE_HEADER, XAI_GROK_AUTHENTICATE_RESPONSE_VALUE)
-	header.Set("x-grok-client-version", DEFAULT_XAI_GROK_CLIENT_VERSION)
-	header.Set("x-grok-client-identifier", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER)
-	header.Set("x-grok-client-mode", DEFAULT_XAI_GROK_CLIENT_MODE)
-	header.Set("User-Agent", xaiGrokUserAgent())
-	header.Set("x-grok-model-override", strings.TrimSpace(envelope.Model))
-
-	requestID := firstNonBlankHeader(header, "x-grok-req-id", "x-request-id")
-	if requestID != "" {
-		header.Set("x-grok-req-id", requestID)
-	}
-	conversationID := firstNonBlankHeader(header, "x-grok-conv-id")
-	if conversationID == "" {
-		conversationID = requestID
-	}
-	if conversationID != "" {
-		header.Set("x-grok-conv-id", conversationID)
-	}
-	sessionID := firstNonBlankHeader(header, "x-grok-session-id")
-	if sessionID == "" {
-		sessionID = conversationID
-	}
-	if sessionID != "" {
-		header.Set("x-grok-session-id", sessionID)
-	}
-	if strings.TrimSpace(header.Get("x-grok-agent-id")) == "" {
-		header.Set("x-grok-agent-id", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER)
-	}
-
-	header.Del("x-grok-user-id")
-	if strings.TrimSpace(cred.AccountID) != "" {
-		header.Set("x-grok-user-id", strings.TrimSpace(cred.AccountID))
 	}
 }
 
@@ -495,31 +428,6 @@ func ensureCommaSeparatedHeader(header http.Header, name, required string) {
 		items = append(items, required)
 	}
 	header.Set(name, strings.Join(items, ","))
-}
-
-func codexUserAgent() string {
-	platform, architecture := userAgentPlatform()
-	return fmt.Sprintf("%s/%s (%s; %s)", DEFAULT_CODEX_ORIGINATOR, DEFAULT_CODEX_VERSION, platform, architecture)
-}
-
-func xaiGrokUserAgent() string {
-	platform, architecture := userAgentPlatform()
-	return fmt.Sprintf("%s/%s (%s; %s)", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, DEFAULT_XAI_GROK_CLIENT_VERSION, platform, architecture)
-}
-
-func userAgentPlatform() (string, string) {
-	platform := "linux"
-	switch runtime.GOOS {
-	case "darwin":
-		platform = "macos"
-	case "windows":
-		platform = "windows"
-	}
-	architecture := "x86_64"
-	if runtime.GOARCH == "arm64" {
-		architecture = "arm64"
-	}
-	return platform, architecture
 }
 
 func transportProxyError(err error) error {

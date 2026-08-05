@@ -67,7 +67,8 @@ proxy/
 │       ├── dispatcher_oauth.go   # NewDispatcherWithAuth[AndEnv] (走 agentsdk credential.Source)
 │       ├── credential.go         # CredentialResolver (包 auth/svc.Resolver)
 │       ├── client.go             # Client.Do / CountTokens / GenerateImage / EditImage + header/secret 套用
-│       ├── antigravity.go        # agentsdk endpoints/identity 綁定 + project 快取 + VALIDATED tool mode
+│       ├── identity.go           # ApplyIdentityHeaders hooks: 各 provider 的 client identity header
+│       ├── antigravity.go        # ApplyCredentialBody hook: 把憑證的 project 蓋進 envelope
 │       ├── realtime.go           # 固定 Realtime endpoints + API-key target/header
 │       └── config.go             # TimeoutConfig
 └── docs/
@@ -82,8 +83,8 @@ proxy/
 - HTTP framework: `github.com/gin-gonic/gin` v1.11.0
 - CLI: `github.com/spf13/cobra` v1.10.2 + `github.com/spf13/viper` v1.21.0
 - Config / logging / middleware: `github.com/bizshuk/gosdk` v1.3.5
-- Auth: `github.com/bizshuk/auth` v0.0.1 (FileStore + svc.Resolver + provider.For)
-- Provider SDK: `github.com/bizshuk/agentsdk` v0.0.46 (core + provider/\* + protocol/sse + antigravity 協定)
+- Auth: `github.com/bizshuk/auth` v0.0.2 (FileStore + svc.Resolver + provider.For)
+- Provider SDK: `github.com/bizshuk/agentsdk` v0.0.49 (core + provider/\* + protocol/sse + antigravity 協定)
 - MCP SDK: `github.com/modelcontextprotocol/go-sdk` v1.6.0
 - Observability: `log/slog` (stdlib) + `go.opentelemetry.io/otel` v1.44.0
 - Test: `github.com/stretchr/testify` v1.11.1
@@ -95,12 +96,17 @@ proxy/
 - `model.Format` 分成 `CLIENT_FORMATS` 與 `PROVIDER_FORMATS`：client format 是 proxy 對外收也對外送的協定，provider format (目前只有 `antigravity`) 只能當 transform 目標。`transform.Registry` 因此只對 client format 做 complete-matrix 檢查 (缺一對就 error)，另外要求每個 provider format 至少有一個 client 能到達、且永不出現在 pair 的 `From` 側。
 - Antigravity 是 provider-only format：wire 是 Gemini `generateContent` 外包一層 Cloud Code envelope (`model` / `project` / `userAgent` / `requestType` / `requestId` / `request`)，與公開 Gemini API 完全不同的 endpoint 與語意，所以不併入 `google` profile。目前只有 `anthropic-messages` 能到達；`openai-chat` / `openai-responses` 打過來會拿到明確的 unsupported-pair 錯誤，而不是被降級轉譯。
 - Antigravity endpoint 分流：非串流走 `/v1internal:generateContent`，串流走 `/v1internal:streamGenerateContent?alt=sse` (不帶 `alt=sse` 會回 chunked JSON 而非 SSE)。`Profile.StreamEndpoints` 就是為這種「串流與非串流不同路徑」而存在；`buildEndpointURL` 因此放寬為允許 profile 常數自帶固定 query，但仍禁止 fragment。
-- Antigravity 的 `project` 由 `loadCodeAssist` 發放而非 OAuth grant 的一部分，憑證常常沒有它。查詢本身歸 agentsdk (`Provider.ProjectID`)；`antigravityProjectResolver` 只負責決定何時查、並以憑證為鍵快取 —— proxy 每個請求各自解析憑證，不快取就會每次都多一次 round-trip。取不到 project 時 agentsdk 退回參考 client 共用的 sentinel project 而非報錯 (未開通帳號是正常的首次狀態)，所以請求會照常送出。
+- `Profile.ApplyCredentialBody` 是 `NormalizeRequest` 的`憑證版孿生 hook`：後者在憑證解析`前`執行，看不到憑證，所以「wire format 把帳號狀態放在 body 而非 header」的 provider 無處落腳。Antigravity 是目前唯一需要的 (envelope 的 `project`)，但 `client.go` 因此不再有 `if profile.ID == ANTIGRAVITY` 的硬編碼特判 —— transport 只問 hook 是不是 nil。
+- `svc/upstream/antigravity.go` 只剩填這個 hook 的實作 (約 50 行)。先前的 project 查詢與快取已隨 auth 接手而刪除。
 - Antigravity tool schema 的 wire 欄位是 `parameters` 而非 `parametersJsonSchema` (gateway 以 protobuf Schema 驗證)；claude-\* 模型帶 tools 時必須補 `toolConfig.functionCallingConfig.mode = VALIDATED`。三份獨立實作 (CLIProxyAPI、antigravity-claude-proxy、antigravity-proxy) 對這兩點一致。
 - Antigravity tool loop 的 thought signature 必須跨請求還原：Gemini 3 會拒絕任何缺 `thoughtSignature` 的重播 functionCall，但 Anthropic Messages 的 `tool_use` block 沒有這個欄位。proxy 兩手都做 —— response/stream 把 signature 寫在 block 上 (保留未知欄位的 client 直接可用)，同時以 tool_use ID 為鍵存進 `antigravitySignatureCache` (bounded 4096, FIFO)，request 端在 block 沒帶 signature 時查回。key 選 tool_use ID 是因為它由 gateway 產生、原樣經 client 折返，即使 client 丟欄位也不會變。這是 transform 層唯一的跨請求狀態：producer 與 consumer 是不同請求，放不進 request-scoped `Exchange`；而 `svc/upstream` 看不到 decode 後的 response。
 - Antigravity 的`協定`歸 `agentsdk/provider/antigravity` 所有: endpoint、client identity header、host fallback、project discovery、Cloud Code envelope 與 Google-dialect schema 轉換都在那邊，`model/antigravity` 只是 alias。proxy 只保留 `wire-to-wire` 的 transform —— agentsdk 的 encode/decode 走 `core.ModelRequest`，那是最小公分母抽象，帶不動 Anthropic 的 thinking signature / cache_control / 多模態 tool result。
 - `model/antigravity` 仍自行宣告 `GenerationConfig` 與 `Inner` 兩個容器: `core.ModelRequest` 完全沒有 sampling 欄位, 所以 agentsdk 的 `GenerationConfig` 沒有 `temperature` / `topP`，其 `GenerateRequest` 也放不下有這兩欄的型別。gateway 是收的 (每個參考 client 都送)，靜靜丟掉會違背 Anthropic caller 的指定，因此只加寬這兩個容器，leaf type 全部沿用 agentsdk。
 - Tool schema 轉換委由 `ag.CleanSchema`: 它把 type 轉大寫、collapse union、過濾 unsupported keyword。proxy 只在呼叫前補一個正規化 —— `{"type":"object"}` 這種完全沒有 `properties` 的零參數 tool，agentsdk 的 placeholder 規則不會觸發 (它只認 `properties: {}`)，而 Google 兩種都拒。
+- `Provider wire fact` 一律不在 proxy 宣告：base URL、endpoint path、identity header、client version、預設 model 都屬於該 vendor 的 `agentsdk/provider/*` package，`svc/upstream` 只引用 (`sdkanthropic.*` / `sdkcodex.*` / `sdkgrok.*` / `ag.*`)。判準是「換一支 client 打同一個 gateway 也一樣」。唯一豁免是 `api.openai.com` —— agentsdk 只模型化 Codex OAuth endpoint，沒有 `provider/openai` adapter，所以那組 `OPENAI_*` 常數暫留 proxy。`svc/upstream/boundary_test.go` 把這條規則變成會失敗的測試。
+- `Profile.ApplyIdentityHeaders` 是 `ApplyCredentialBody` 的 header 版孿生：gateway 在憑證之外還檢查的「誰在呼叫」(Codex 的 originator/version、Antigravity 的 IDE identity、Grok OAuth 的 CLI identity 與 tracking id) 由 profile 自帶 hook，`client.go` 只問 hook 是不是 nil。因此 transport 內已無任何 `if profile.ID == ...` 分支。`Surface` 參數存在的理由是 xAI：Imagine 走公開 host，會拒收 inference 用的 cli-chat-proxy identity header。
+- `Profile.OAuthScheme` 讓憑證種類影響 auth header 成為`資料`而非分支：Anthropic 同一 endpoint 對 API key 讀 `x-api-key`、對 access token 讀 `Authorization`。空值表示兩者相同。原本的 `AnthropicVersion` 欄位已刪除 (只有一個 profile 用)，改由該 profile 的 identity hook 發送。
+- `CLIENT_IDENTIFIER = "proxy"` 是本程式對 gateway 的自稱，刻意不冒用參考 CLI 的名字 —— gateway 依此歸因流量，冒名會錯報呼叫者。這是少數留在 `svc/upstream` 的字串常數之一。
 - Dispatcher 與 Catalog 並存：Dispatcher 持有 live `core.Provider`，供 `/v1/models` 取 catalog；Catalog 持有每家 profile 的 endpoint/auth header/normalizer，供 `Client.do` 使用。短期不收斂 (見 `docs/specs/2026-07-16-pairwise-agent-provider-transform.md` 之 Phase C 註記)。
 - `Pair.NewStream` 採「factory 產生 isolated `StreamTransform`」模型：每個請求一份狀態，無共享 mutex；與 `StreamCollector` 的 `Push`/`Close` 模型對稱。
 - `handleBridge`：當 client 要求非串流但 `Profile.NormalizeRequest` 標記 `BridgeToNonStream=true` (例如 Codex OAuth 強制 `stream:true`) 時，把上游 SSE 流整段收集後回 JSON；`boundedStreamCollector` 防止記憶體爆。

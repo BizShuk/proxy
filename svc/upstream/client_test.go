@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	sdkanthropic "github.com/bizshuk/agentsdk/provider/anthropic"
+	sdkcodex "github.com/bizshuk/agentsdk/provider/codex"
+	sdkgrok "github.com/bizshuk/agentsdk/provider/grok"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -111,7 +114,7 @@ func TestClientGenerateImageUsesDirectXAIAPIForAPIKeyAndOAuth(t *testing.T) {
 			profileID: XAI_GROK_OAUTH_PROFILE_ID,
 			credential: &authmodel.Credential{
 				Provider: "xai", Kind: authmodel.KIND_OAUTH, AccessToken: "xai-oauth-token",
-				BaseURL: XAI_GROK_OAUTH_BASE_URL,
+				BaseURL: sdkgrok.OAuthBaseURL,
 			},
 			wantAuthorization: "Bearer xai-oauth-token",
 		},
@@ -139,11 +142,11 @@ func TestClientGenerateImageUsesDirectXAIAPIForAPIKeyAndOAuth(t *testing.T) {
 			assert.Equal(t, "/v1/images/generations", upstreamRequest.path)
 			assert.Equal(t, tc.wantAuthorization, upstreamRequest.authorization)
 			assert.Equal(t, "image-request-1", upstreamRequest.headers.Get("x-request-id"))
-			assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_VERSION, upstreamRequest.headers.Get("x-grok-client-version"))
-			assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, upstreamRequest.headers.Get("x-grok-client-identifier"))
-			assert.Equal(t, xaiGrokUserAgent(), upstreamRequest.headers.Get("User-Agent"))
-			assert.Empty(t, upstreamRequest.headers.Get(XAI_GROK_TOKEN_AUTH_HEADER))
-			assert.Empty(t, upstreamRequest.headers.Get(XAI_GROK_AUTHENTICATE_RESPONSE_HEADER))
+			assert.Equal(t, sdkgrok.ClientVersion, upstreamRequest.headers.Get("x-grok-client-version"))
+			assert.Equal(t, CLIENT_IDENTIFIER, upstreamRequest.headers.Get("x-grok-client-identifier"))
+			assert.Equal(t, expectedXAIGrokUserAgent(), upstreamRequest.headers.Get("User-Agent"))
+			assert.Empty(t, upstreamRequest.headers.Get(sdkgrok.TokenAuthHeader))
+			assert.Empty(t, upstreamRequest.headers.Get(sdkgrok.AuthenticateResponseHeader))
 			assert.Empty(t, upstreamRequest.headers.Get("x-grok-model-override"))
 			assert.JSONEq(t, string(requestBody), string(upstreamRequest.body))
 		})
@@ -381,18 +384,18 @@ func TestClientDoAppliesProviderSpecificHeaders(t *testing.T) {
 			assert: func(t *testing.T, header http.Header) {
 				assert.Equal(t, "anthropic-key", header.Get("x-api-key"))
 				assert.Empty(t, header.Get("Authorization"))
-				assert.Equal(t, ANTHROPIC_VERSION, header.Get("anthropic-version"))
+				assert.Equal(t, sdkanthropic.APIVersion, header.Get("anthropic-version"))
 			},
 		},
 		{
 			name: "Anthropic OAuth", profileID: "anthropic", target: model.FORMAT_ANTHROPIC_MESSAGES, stream: true,
 			credential: &authmodel.Credential{Provider: "anthropic", Kind: authmodel.KIND_OAUTH, AccessToken: "anthropic-token"},
-			headers:    http.Header{"anthropic-beta": {"tools-2024-04-04", ANTHROPIC_OAUTH_BETA + ", tools-2024-04-04"}},
+			headers:    http.Header{"anthropic-beta": {"tools-2024-04-04", sdkanthropic.OAuthBetaValue + ", tools-2024-04-04"}},
 			assert: func(t *testing.T, header http.Header) {
 				assert.Equal(t, "Bearer anthropic-token", header.Get("Authorization"))
 				assert.Empty(t, header.Get("x-api-key"))
 				assert.Equal(t, "true", header.Get("anthropic-dangerous-direct-browser-access"))
-				assert.ElementsMatch(t, []string{"tools-2024-04-04", ANTHROPIC_OAUTH_BETA}, commaSeparatedValues(header.Values("anthropic-beta")))
+				assert.ElementsMatch(t, []string{"tools-2024-04-04", sdkanthropic.OAuthBetaValue}, commaSeparatedValues(header.Values("anthropic-beta")))
 				assert.Equal(t, "text/event-stream", header.Get("Accept"))
 			},
 		},
@@ -417,8 +420,8 @@ func TestClientDoAppliesProviderSpecificHeaders(t *testing.T) {
 			assert: func(t *testing.T, header http.Header) {
 				assert.Equal(t, "Bearer codex-token", header.Get("Authorization"))
 				assert.Equal(t, "acct-uuid", header.Get("ChatGPT-Account-ID"))
-				assert.Equal(t, DEFAULT_CODEX_ORIGINATOR, header.Get("originator"))
-				assert.Equal(t, DEFAULT_CODEX_VERSION, header.Get("version"))
+				assert.Equal(t, sdkcodex.CodexOriginator, header.Get("originator"))
+				assert.Equal(t, sdkcodex.CodexVersion, header.Get("version"))
 				assert.Equal(t, expectedCodexUserAgent(), header.Get("User-Agent"))
 			},
 		},
@@ -502,7 +505,7 @@ func TestClientDoAppliesXAIGrokOAuthProtocol(t *testing.T) {
 				assert.Equal(t, "request-fallback", header.Get("x-grok-req-id"))
 				assert.Equal(t, "request-fallback", header.Get("x-grok-conv-id"))
 				assert.Equal(t, "request-fallback", header.Get("x-grok-session-id"))
-				assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, header.Get("x-grok-agent-id"))
+				assert.Equal(t, CLIENT_IDENTIFIER, header.Get("x-grok-agent-id"))
 				assert.Empty(t, header.Get("x-grok-turn-idx"))
 				assert.Empty(t, header.Get("x-grok-deployment-id"))
 				assert.Empty(t, header.Get("x-grok-user-id"))
@@ -515,11 +518,11 @@ func TestClientDoAppliesXAIGrokOAuthProtocol(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/v1/responses", r.URL.Path)
 				assert.Equal(t, "Bearer xai-oauth-token", r.Header.Get("Authorization"))
-				assert.Equal(t, XAI_GROK_TOKEN_AUTH_VALUE, r.Header.Get(XAI_GROK_TOKEN_AUTH_HEADER))
-				assert.Equal(t, XAI_GROK_AUTHENTICATE_RESPONSE_VALUE, r.Header.Get(XAI_GROK_AUTHENTICATE_RESPONSE_HEADER))
-				assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_MODE, r.Header.Get("x-grok-client-mode"))
-				assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_VERSION, r.Header.Get("x-grok-client-version"))
-				assert.Equal(t, DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, r.Header.Get("x-grok-client-identifier"))
+				assert.Equal(t, sdkgrok.TokenAuthValue, r.Header.Get(sdkgrok.TokenAuthHeader))
+				assert.Equal(t, sdkgrok.AuthenticateResponseValue, r.Header.Get(sdkgrok.AuthenticateResponseHeader))
+				assert.Equal(t, sdkgrok.DefaultClientMode, r.Header.Get("x-grok-client-mode"))
+				assert.Equal(t, sdkgrok.ClientVersion, r.Header.Get("x-grok-client-version"))
+				assert.Equal(t, CLIENT_IDENTIFIER, r.Header.Get("x-grok-client-identifier"))
 				assert.Equal(t, "grok-4.5", r.Header.Get("x-grok-model-override"))
 				assert.Equal(t, expectedXAIGrokUserAgent(), r.Header.Get("User-Agent"))
 				tc.assert(t, r.Header)
@@ -677,7 +680,7 @@ func TestClientCountTokensUsesNativeEndpointAndTimeout(t *testing.T) {
 		capturedContext = req.Context()
 		assert.Equal(t, "/v1/messages/count_tokens", req.URL.Path)
 		assert.Equal(t, "anthropic-key", req.Header.Get("x-api-key"))
-		assert.Equal(t, ANTHROPIC_VERSION, req.Header.Get("anthropic-version"))
+		assert.Equal(t, sdkanthropic.APIVersion, req.Header.Get("anthropic-version"))
 		body, err := io.ReadAll(req.Body)
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"model":"claude-3-5-sonnet-latest","messages":[]}`, string(body))
@@ -780,7 +783,7 @@ func expectedCodexUserAgent() string {
 	if runtime.GOARCH == "arm64" {
 		architecture = "arm64"
 	}
-	return fmt.Sprintf("%s/%s (%s; %s)", DEFAULT_CODEX_ORIGINATOR, DEFAULT_CODEX_VERSION, platform, architecture)
+	return fmt.Sprintf("%s/%s (%s; %s)", sdkcodex.CodexOriginator, sdkcodex.CodexVersion, platform, architecture)
 }
 
 func expectedXAIGrokUserAgent() string {
@@ -795,7 +798,7 @@ func expectedXAIGrokUserAgent() string {
 	if runtime.GOARCH == "arm64" {
 		architecture = "arm64"
 	}
-	return fmt.Sprintf("%s/%s (%s; %s)", DEFAULT_XAI_GROK_CLIENT_IDENTIFIER, DEFAULT_XAI_GROK_CLIENT_VERSION, platform, architecture)
+	return fmt.Sprintf("%s/%s (%s; %s)", CLIENT_IDENTIFIER, sdkgrok.ClientVersion, platform, architecture)
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

@@ -439,7 +439,16 @@ func TestAnthropicProfileHeaderMetadata(t *testing.T) {
 	profile, ok := catalog.Lookup("anthropic")
 	require.True(t, ok)
 
-	assert.Equal(t, "2023-06-01", profile.AnthropicVersion)
+	// The dated wire contract is now stamped by the identity hook, not by a
+	// Profile field, so assert the hook exists and produces it.
+	require.NotNil(t, profile.ApplyIdentityHeaders)
+	header := http.Header{}
+	profile.ApplyIdentityHeaders(IdentityRequest{
+		Credential: &authmodel.Credential{Kind: authmodel.KIND_API_KEY},
+		Header:     header,
+		Surface:    SURFACE_INFERENCE,
+	})
+	assert.Equal(t, "2023-06-01", header.Get("anthropic-version"))
 	assert.True(t, profile.AllowsRequestHeader("anthropic-beta"))
 	assert.False(t, profile.AllowsRequestHeader("anthropic-version"))
 	assert.Equal(t, "/v1/messages/count_tokens", profile.CountTokensEndpoint)

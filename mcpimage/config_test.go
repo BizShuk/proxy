@@ -3,13 +3,14 @@ package mcpimage
 import (
 	"testing"
 
-	"github.com/bizshuk/proxy/svc/upstream"
+	sdkgrok "github.com/bizshuk/agentsdk/provider/grok"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultModelUsesGrokUpstreamCatalogValue(t *testing.T) {
-	assert.Equal(t, upstream.XAI_GROK_IMAGE_DEFAULT_MODEL, DEFAULT_MODEL)
+	assert.Equal(t, sdkgrok.DefaultImageModel, DEFAULT_MODEL)
 }
 
 func TestLoadConfigFromEnvUsesDefaultsAndProxyAPIKey(t *testing.T) {

@@ -3,8 +3,6 @@ package upstream
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	ag "github.com/bizshuk/agentsdk/provider/antigravity"
@@ -63,9 +61,15 @@ func TestBuildEndpointURLStillRejectsFragments(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestInjectAntigravityProjectStampsEnvelope(t *testing.T) {
-	body, err := injectAntigravityProject(
-		[]byte(`{"model":"gemini-3.1-pro-high","request":{"contents":[]}}`), "projects/demo")
+// The Antigravity envelope carries the Cloud Code project in the body, which
+// is why Profile declares a credential-aware body hook at all.
+func TestAntigravityCredentialBodyStampsProject(t *testing.T) {
+	body, err := applyAntigravityCredentialBody(context.Background(),
+		&authmodel.Credential{
+			Provider: ANTIGRAVITY_PROFILE_ID, Kind: authmodel.KIND_OAUTH,
+			AccessToken: "at", ProjectID: "projects/demo",
+		},
+		[]byte(`{"model":"gemini-3.1-pro-high","request":{"contents":[]}}`))
 	require.NoError(t, err)
 
 	var envelope map[string]any
@@ -73,6 +77,23 @@ func TestInjectAntigravityProjectStampsEnvelope(t *testing.T) {
 	assert.Equal(t, "projects/demo", envelope["project"])
 	assert.Equal(t, "gemini-3.1-pro-high", envelope["model"])
 	assert.Contains(t, envelope, "request")
+}
+
+// Profiles that need nothing from the credential must declare no hook, so the
+// generic path stays a straight pass-through for them.
+func TestOnlyAntigravityDeclaresCredentialBodyHook(t *testing.T) {
+	catalog, err := DefaultCatalog()
+	require.NoError(t, err)
+
+	antigravity, ok := catalog.Lookup(ANTIGRAVITY_PROFILE_ID)
+	require.True(t, ok)
+	assert.NotNil(t, antigravity.ApplyCredentialBody)
+
+	for _, id := range []string{"anthropic", "openai-api", "google", "xai", "minimax"} {
+		profile, ok := catalog.Lookup(id)
+		require.Truef(t, ok, "profile %q", id)
+		assert.Nilf(t, profile.ApplyCredentialBody, "profile %q must not need one", id)
+	}
 }
 
 // Antigravity must claim only model IDs no other provider serves; a bare
@@ -101,65 +122,17 @@ func TestAntigravityRoutingDoesNotHijackOtherProviders(t *testing.T) {
 	assert.Equal(t, "google", google.ProviderID)
 }
 
-func TestAntigravityProjectResolverPrefersCredentialProject(t *testing.T) {
-	resolver := newAntigravityProjects()
+// 憑證沒帶 project 時必須明確報錯而不是靜靜送出註定被拒的請求。
+// 解析 project 是 auth 登入流程的事,proxy 不代為補查。
+func TestAntigravityCredentialBodyRequiresProject(t *testing.T) {
+	_, err := applyAntigravityCredentialBody(context.Background(),
+		&authmodel.Credential{
+			Provider: ANTIGRAVITY_PROFILE_ID, Kind: authmodel.KIND_OAUTH, AccessToken: "at",
+		},
+		[]byte(`{"model":"m","request":{"contents":[]}}`))
 
-	project, err := resolver.Resolve(context.Background(), &authmodel.Credential{
-		Provider: ANTIGRAVITY_PROFILE_ID, Kind: authmodel.KIND_OAUTH,
-		AccessToken: "at", ProjectID: "projects/stored",
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "projects/stored", project)
-}
-
-// The project is issued by loadCodeAssist, not by the OAuth grant, so
-// credentials minted elsewhere must be resolvable without a re-login — and the
-// lookup must happen once per credential, not once per request.
-func TestAntigravityProjectResolverFetchesAndCaches(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		assert.Equal(t, "/v1internal:loadCodeAssist", r.URL.Path)
-		assert.Equal(t, "Bearer at", r.Header.Get("Authorization"))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"cloudaicompanionProject":"projects/fetched"}`))
-	}))
-	defer server.Close()
-
-	resolver := newAntigravityProjects()
-	resolver.baseURL = server.URL
-	cred := &authmodel.Credential{
-		Provider: ANTIGRAVITY_PROFILE_ID, Kind: authmodel.KIND_OAUTH,
-		Account: "dev@example.com", AccessToken: "at",
-	}
-
-	first, err := resolver.Resolve(context.Background(), cred)
-	require.NoError(t, err)
-	assert.Equal(t, "projects/fetched", first)
-
-	second, err := resolver.Resolve(context.Background(), cred)
-	require.NoError(t, err)
-	assert.Equal(t, "projects/fetched", second)
-	assert.Equal(t, 1, calls)
-}
-
-// A brand-new account has no provisioned project. agentsdk treats that as the
-// normal first-run state and falls back to the sentinel project the reference
-// clients use, so the request proceeds instead of failing.
-func TestAntigravityProjectResolverFallsBackToSentinelProject(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"allowedTiers":[{"id":"free-tier"}]}`))
-	}))
-	defer server.Close()
-
-	resolver := newAntigravityProjects()
-	resolver.baseURL = server.URL
-
-	project, err := resolver.Resolve(context.Background(), &authmodel.Credential{
-		Provider: ANTIGRAVITY_PROFILE_ID, Kind: authmodel.KIND_OAUTH,
-		Account: "new@example.com", AccessToken: "at",
-	})
-	require.NoError(t, err)
-	assert.Equal(t, ag.DefaultProjectID, project)
+	require.Error(t, err)
+	var proxyErr *model.ProxyError
+	require.ErrorAs(t, err, &proxyErr)
+	assert.Equal(t, "antigravity_project_missing", proxyErr.Code)
 }
