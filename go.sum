@@ -4,8 +4,8 @@ github.com/anthropics/anthropic-sdk-go v1.61.0 h1:JRTnm1tPqn5xo1xd1zfrcFDlcoWXVM
 github.com/anthropics/anthropic-sdk-go v1.61.0/go.mod h1:3EfIfmFqxH6rbiLcIP4tPFyXL/IHakx2wDG4OU+TIEI=
 github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPnH1Wvgk=
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
-github.com/bizshuk/agentsdk v0.0.49 h1:60nd0O2P7KSz+Zx4EiGWS8IkYaOYQ/OVNdTo6BkNy3g=
-github.com/bizshuk/agentsdk v0.0.49/go.mod h1:rTCHiKFLc1GSGyTm2nndRpwbgMQctFYJQMPOgRxcOwo=
+github.com/bizshuk/agentsdk v0.0.50 h1:7RVMd5/H/YKNiYw8hewLiG6y90HcTSK+xGIkigfsWtQ=
+github.com/bizshuk/agentsdk v0.0.50/go.mod h1:rTCHiKFLc1GSGyTm2nndRpwbgMQctFYJQMPOgRxcOwo=
 github.com/bizshuk/auth v0.0.2 h1:tqrV+NitnuLmhdp6wAaV8ZaPOSMy7sooTcJBzxzFHyI=
 github.com/bizshuk/auth v0.0.2/go.mod h1:1H8HFjZvMkKV/bxm4EkliclcAvRQqAocGfoquLrLq8s=
 github.com/bizshuk/gosdk v1.3.5 h1:2tqLJsQ6DQ8H90/wBptJusrqpr5MXAc3q1Gfagm1bS0=
