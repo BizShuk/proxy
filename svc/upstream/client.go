@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	ag "github.com/bizshuk/agentsdk/provider/antigravity"
 	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/proxy/model"
 )
@@ -31,7 +32,7 @@ type Client struct {
 	messagesTimeout     time.Duration
 	streamTimeout       time.Duration
 	countTokensTimeout  time.Duration
-	antigravityProjects *antigravityProjectResolver
+	antigravityProjects *antigravityProjects
 }
 
 // NewClient clones an injected HTTP client and applies proxy timeout policy.
@@ -77,7 +78,7 @@ func NewClient(httpClient *http.Client, cfg TimeoutConfig) (*Client, error) {
 		messagesTimeout:     time.Duration(cfg.MessagesMs) * time.Millisecond,
 		streamTimeout:       time.Duration(cfg.StreamMessagesMs) * time.Millisecond,
 		countTokensTimeout:  time.Duration(cfg.CountTokensMs) * time.Millisecond,
-		antigravityProjects: newAntigravityProjectResolver(),
+		antigravityProjects: newAntigravityProjects(),
 	}, nil
 }
 
@@ -414,10 +415,10 @@ func applyProviderHeaders(profile Profile, cred *authmodel.Credential, header ht
 	}
 	if profile.ID == ANTIGRAVITY_PROFILE_ID {
 		// The Cloud Code gateway gates on IDE identity, not just the token.
-		header.Set("User-Agent", antigravityUserAgent())
-		header.Set("X-Client-Name", ANTIGRAVITY_CLIENT_NAME)
-		header.Set("X-Client-Version", ANTIGRAVITY_CLIENT_VERSION)
-		header.Set("x-goog-api-client", ANTIGRAVITY_GOOG_API_CLIENT)
+		header.Set("User-Agent", ag.UserAgent())
+		header.Set("X-Client-Name", ag.CLIENT_NAME)
+		header.Set("X-Client-Version", ag.ClientVersion)
+		header.Set("x-goog-api-client", ag.GOOG_API_CLIENT)
 	}
 }
 

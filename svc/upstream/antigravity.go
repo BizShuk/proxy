@@ -11,129 +11,83 @@ import (
 	"github.com/bizshuk/agentsdk/provider"
 	ag "github.com/bizshuk/agentsdk/provider/antigravity"
 	authmodel "github.com/bizshuk/auth/model"
-	"github.com/bizshuk/proxy/model"
 )
 
-// The Antigravity protocol — endpoints, client identity, host fallback and
-// project discovery — is owned by agentsdk/provider/antigravity. This file
-// binds that contract onto the proxy's Profile/Client machinery; the constants
-// below are aliases, not a second source of truth.
-const (
-	// ANTIGRAVITY_PROFILE_ID names the Antigravity gateway profile.
-	ANTIGRAVITY_PROFILE_ID = "antigravity"
-	// ANTIGRAVITY_BASE_URL is the production channel.
-	//
-	// agentsdk defaults to the daily channel and falls back to production, but
-	// a proxy Profile carries exactly one host and has no retry ladder, so the
-	// single choice goes to the channel this proxy has verified end to end.
-	// agentsdk's own daily-first order still applies to project discovery,
-	// which runs through its client rather than this profile.
-	ANTIGRAVITY_BASE_URL = ag.FallbackBaseURL
-	// ANTIGRAVITY_GENERATE_PATH is the blocking generation endpoint.
-	ANTIGRAVITY_GENERATE_PATH = ag.PATH_GENERATE
-	// ANTIGRAVITY_STREAM_PATH is the SSE generation endpoint. The gateway only
-	// emits SSE when alt=sse is set; without it the response is chunked JSON.
-	ANTIGRAVITY_STREAM_PATH = ag.PATH_STREAM
+// ANTIGRAVITY_PROFILE_ID names the Antigravity gateway profile. Everything
+// else about the protocol — endpoints, client identity, host fallback, project
+// discovery, the envelope and the schema dialect — belongs to
+// agentsdk/provider/antigravity and is referenced there directly.
+const ANTIGRAVITY_PROFILE_ID = "antigravity"
 
-	// ANTIGRAVITY_TOOL_MODE_VALIDATED is the function-calling mode the
-	// gateway's Claude models require.
-	ANTIGRAVITY_TOOL_MODE_VALIDATED = "VALIDATED"
-	// ANTIGRAVITY_GOOG_API_CLIENT mimics the Node client the IDE ships with.
-	ANTIGRAVITY_GOOG_API_CLIENT = ag.GOOG_API_CLIENT
-	// ANTIGRAVITY_CLIENT_NAME is the gateway's client identity header value.
-	ANTIGRAVITY_CLIENT_NAME = ag.CLIENT_NAME
-	// ANTIGRAVITY_CLIENT_VERSION is the IDE build advertised upstream.
-	ANTIGRAVITY_CLIENT_VERSION = ag.ClientVersion
-)
-
-// antigravityUserAgent is the IDE identity the gateway matches on.
-func antigravityUserAgent() string { return ag.UserAgent() }
-
-// antigravityProjectResolver caches the Cloud Code project each credential
-// bills against.
+// antigravityProjects keeps one agentsdk client per credential so its own
+// project cache survives between requests.
 //
-// The project is not part of the OAuth grant: it is issued by loadCodeAssist
-// and must ride in every request envelope, so credentials minted by other
-// tools arrive without one. The lookup itself belongs to agentsdk; this type
-// only decides when to run it and remembers the answer, since the proxy
-// resolves a credential per request and would otherwise repeat the round-trip
-// on every call.
-type antigravityProjectResolver struct {
-	// baseURL overrides the gateway host, for tests and for credentials
-	// pinned to a private gateway.
-	baseURL  string
-	mu       sync.Mutex
-	projects map[string]string
+// agentsdk discovers the Cloud Code project once per Provider and remembers it.
+// The proxy resolves a credential per request and builds no long-lived
+// provider, so without this the discovery round-trip would run on every call.
+// The map is the whole addition; the lookup itself stays agentsdk's.
+type antigravityProjects struct {
+	// baseURL pins the gateway host. Empty means agentsdk's own daily-then-
+	// production order, which is what production wants; tests set it.
+	baseURL string
+	mu      sync.Mutex
+	clients map[string]*ag.Provider
 }
 
-func newAntigravityProjectResolver() *antigravityProjectResolver {
-	return &antigravityProjectResolver{projects: make(map[string]string)}
+func newAntigravityProjects() *antigravityProjects {
+	return &antigravityProjects{clients: make(map[string]*ag.Provider)}
 }
 
-// Resolve returns the project for a credential, hitting loadCodeAssist only on
-// the first call for that credential.
-func (r *antigravityProjectResolver) Resolve(ctx context.Context, cred *authmodel.Credential) (string, error) {
+// Resolve returns the Cloud Code project the credential bills against.
+func (r *antigravityProjects) Resolve(ctx context.Context, cred *authmodel.Credential) (string, error) {
 	if cred == nil {
 		return "", authProxyError("antigravity credential is nil", nil)
 	}
+	// A credential that already carries its project needs no client at all.
 	if project := strings.TrimSpace(cred.ProjectID); project != "" {
 		return project, nil
 	}
 	if r == nil {
 		return "", unavailableUpstreamError("antigravity project resolver is unavailable", nil)
 	}
-
-	key := cred.Name()
-	r.mu.Lock()
-	cached, found := r.projects[key]
-	r.mu.Unlock()
-	if found {
-		return cached, nil
-	}
-
-	project, err := r.fetchProject(ctx, cred)
+	client, err := r.clientFor(cred)
 	if err != nil {
 		return "", err
 	}
-	r.mu.Lock()
-	r.projects[key] = project
-	r.mu.Unlock()
-	return project, nil
+	// agentsdk never fails this: an account with no provisioned project falls
+	// back to the sentinel the reference clients use.
+	return client.ProjectID(ctx, agcore.Auth{})
 }
 
-func (r *antigravityProjectResolver) fetchProject(ctx context.Context, cred *authmodel.Credential) (string, error) {
+func (r *antigravityProjects) clientFor(cred *authmodel.Credential) (*ag.Provider, error) {
 	token := strings.TrimSpace(cred.AccessToken)
 	if token == "" {
-		return "", authProxyError("antigravity credential has no access token", nil)
+		return nil, authProxyError("antigravity credential has no access token", nil)
 	}
 
+	key := cred.Name()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if client, found := r.clients[key]; found {
+		return client, nil
+	}
+
+	config := provider.ResolvedConfig{Auth: agcore.Auth{Bearer: token}}
 	// A credential pinned to a gateway must have its project looked up through
 	// that same gateway, matching how the generation request is routed.
 	baseURL := strings.TrimSpace(cred.BaseURL)
 	if baseURL == "" {
 		baseURL = r.baseURL
 	}
-
-	config := provider.ResolvedConfig{Auth: agcore.Auth{Bearer: token}}
 	if baseURL != "" {
 		config.BaseURL = strings.TrimRight(baseURL, "/")
 	}
-	adapter, err := ag.New(config)
+	client, err := ag.New(config)
 	if err != nil {
-		return "", unavailableUpstreamError("build antigravity project resolver", err)
+		return nil, unavailableUpstreamError("build antigravity client", err)
 	}
-
-	project, err := adapter.ProjectID(ctx, agcore.Auth{})
-	if err != nil {
-		return "", &model.ProxyError{
-			Kind:    model.ERROR_AUTH,
-			Status:  400,
-			Code:    "antigravity_project_missing",
-			Message: "antigravity credential has no Cloud Code project; sign in with the Antigravity IDE once to provision it",
-			Cause:   err,
-		}
-	}
-	return project, nil
+	r.clients[key] = client
+	return client, nil
 }
 
 // injectAntigravityProject stamps the resolved project onto the request
@@ -149,52 +103,5 @@ func injectAntigravityProject(body []byte, project string) ([]byte, error) {
 		return nil, fmt.Errorf("encode antigravity project: %w", err)
 	}
 	envelope["project"] = encoded
-	return json.Marshal(envelope)
-}
-
-func normalizeAntigravityRequest(envelope model.RequestEnvelope) (NormalizedRequest, error) {
-	if envelope.TargetFormat != model.FORMAT_ANTIGRAVITY {
-		return NormalizedRequest{}, unsupportedFormatError(ANTIGRAVITY_PROFILE_ID, envelope.TargetFormat)
-	}
-	body, err := applyAntigravityToolMode(envelope.Body, envelope.Model)
-	if err != nil {
-		return NormalizedRequest{}, err
-	}
-	return NormalizedRequest{
-		Body:           body,
-		UpstreamStream: envelope.Stream,
-	}, nil
-}
-
-// applyAntigravityToolMode forces VALIDATED function calling for the gateway's
-// Claude models. Those models reject tool arguments that skip upstream
-// validation, and unlike the Gemini families they do not default to it.
-func applyAntigravityToolMode(body []byte, modelName string) ([]byte, error) {
-	if !strings.Contains(strings.ToLower(strings.TrimSpace(modelName)), "claude") {
-		return body, nil
-	}
-	var envelope map[string]json.RawMessage
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, invalidRequestError("normalize antigravity request", err)
-	}
-	var inner map[string]json.RawMessage
-	if err := json.Unmarshal(envelope["request"], &inner); err != nil {
-		return nil, invalidRequestError("normalize antigravity request", err)
-	}
-	if _, hasTools := inner["tools"]; !hasTools {
-		return body, nil
-	}
-	toolConfig, err := json.Marshal(map[string]any{
-		"functionCallingConfig": map[string]any{"mode": ANTIGRAVITY_TOOL_MODE_VALIDATED},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("encode antigravity tool config: %w", err)
-	}
-	inner["toolConfig"] = toolConfig
-	encodedInner, err := json.Marshal(inner)
-	if err != nil {
-		return nil, fmt.Errorf("encode antigravity request: %w", err)
-	}
-	envelope["request"] = encodedInner
 	return json.Marshal(envelope)
 }

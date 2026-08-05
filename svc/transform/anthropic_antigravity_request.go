@@ -52,6 +52,16 @@ func AnthropicToAntigravityRequest(_ context.Context, env model.RequestEnvelope)
 	toolConfig, choiceLosses := anthropicToolChoiceToAntigravity(src.ToolChoice)
 	inner.ToolConfig = toolConfig
 	losses = append(losses, choiceLosses...)
+	// The gateway's Claude models reject tool arguments that skip upstream
+	// validation, and unlike the Gemini families they do not default to it.
+	// This overrides any caller-derived mode: without it the tools fail.
+	if len(tools) > 0 && isAntigravityClaudeModel(env.Model) {
+		inner.ToolConfig = &antigravity.ToolConfig{
+			FunctionCallingConfig: antigravity.FunctionCallingConfig{
+				Mode: antigravity.MODE_VALIDATED,
+			},
+		}
+	}
 
 	inner.GenerationConfig = anthropicGenerationConfig(src, env.Model)
 	inner.SessionID = antigravitySessionID(contents)

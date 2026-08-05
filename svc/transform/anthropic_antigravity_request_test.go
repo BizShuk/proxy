@@ -6,11 +6,27 @@ import (
 	"strings"
 	"testing"
 
+	ag "github.com/bizshuk/agentsdk/provider/antigravity"
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/model/antigravity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func antigravityRequestFor(t *testing.T, modelName, body string) antigravity.Request {
+	t.Helper()
+	result, err := AnthropicToAntigravityRequest(context.Background(), model.RequestEnvelope{
+		SourceFormat: model.FORMAT_ANTHROPIC_MESSAGES,
+		TargetFormat: model.FORMAT_ANTIGRAVITY,
+		Model:        modelName,
+		Body:         []byte(body),
+	})
+	require.NoError(t, err)
+
+	var decoded antigravity.Request
+	require.NoError(t, json.Unmarshal(result.Body, &decoded))
+	return decoded
+}
 
 func antigravityRequest(t *testing.T, body string, stream bool) antigravity.Request {
 	t.Helper()
@@ -249,4 +265,81 @@ func TestAnthropicToAntigravityRequestRejectsUnknownBlock(t *testing.T) {
 		}`),
 	})
 	require.ErrorContains(t, err, "document")
+}
+
+// The gateway's Claude models reject tool arguments that skip upstream
+// validation, and unlike the Gemini families they do not default to it.
+func TestAnthropicToAntigravityRequestForcesValidatedToolModeForClaude(t *testing.T) {
+	body := `{
+		"model": "claude-sonnet-4-6", "max_tokens": 64,
+		"messages": [{"role": "user", "content": [{"type": "text", "text": "go"}]}],
+		"tools": [{"name": "run", "input_schema": {"type": "object"}}],
+		"tool_choice": {"type": "auto"}
+	}`
+
+	claude := antigravityRequestFor(t, "claude-sonnet-4-6", body)
+	require.NotNil(t, claude.Request.ToolConfig)
+	assert.Equal(t, antigravity.MODE_VALIDATED, claude.Request.ToolConfig.FunctionCallingConfig.Mode)
+
+	// Gemini keeps whatever the caller's tool_choice mapped to.
+	gemini := antigravityRequestFor(t, "gemini-3.1-pro-high", body)
+	require.NotNil(t, gemini.Request.ToolConfig)
+	assert.Equal(t, antigravity.MODE_AUTO, gemini.Request.ToolConfig.FunctionCallingConfig.Mode)
+}
+
+// Without tools there is nothing to validate, so the override must not appear.
+func TestAnthropicToAntigravityRequestSkipsToolModeWithoutTools(t *testing.T) {
+	decoded := antigravityRequestFor(t, "claude-sonnet-4-6", `{
+		"model": "claude-sonnet-4-6", "max_tokens": 64,
+		"messages": [{"role": "user", "content": [{"type": "text", "text": "go"}]}]
+	}`)
+
+	assert.Nil(t, decoded.Request.ToolConfig)
+}
+
+// Claude spells the thinking control in snake_case; Gemini uses camelCase, and
+// each family rejects the other's spelling.
+func TestAnthropicToAntigravityRequestSplitsThinkingConfigByFamily(t *testing.T) {
+	body := `{
+		"model": "m", "max_tokens": 64,
+		"messages": [{"role": "user", "content": [{"type": "text", "text": "go"}]}],
+		"thinking": {"type": "enabled", "budget_tokens": 4096}
+	}`
+
+	claude := antigravityRequestFor(t, "claude-sonnet-4-6", body)
+	claudeThinking := claude.Request.GenerationConfig.ThinkingConfig.(map[string]any)
+	assert.Contains(t, claudeThinking, "thinking_budget")
+	assert.Contains(t, claudeThinking, "include_thoughts")
+	// The gateway requires max_tokens strictly above the thinking budget.
+	assert.Greater(t, claude.Request.GenerationConfig.MaxOutputTokens, 4096)
+
+	gemini := antigravityRequestFor(t, "gemini-3.1-pro-high", body)
+	geminiThinking := gemini.Request.GenerationConfig.ThinkingConfig.(map[string]any)
+	assert.Contains(t, geminiThinking, "thinkingBudget")
+	assert.Contains(t, geminiThinking, "includeThoughts")
+}
+
+// Gemini rejects anything above its output ceiling outright, so an oversized
+// caller request is clamped rather than failed.
+func TestAnthropicToAntigravityRequestClampsGeminiMaxTokens(t *testing.T) {
+	decoded := antigravityRequestFor(t, "gemini-3.1-pro-high", `{
+		"model": "gemini-3.1-pro-high", "max_tokens": 200000,
+		"messages": [{"role": "user", "content": [{"type": "text", "text": "go"}]}]
+	}`)
+
+	assert.Equal(t, ag.GEMINI_MAX_OUTPUT_TOKENS, decoded.Request.GenerationConfig.MaxOutputTokens)
+}
+
+// Anthropic callers set sampling controls that core.ModelRequest cannot carry,
+// so the proxy's widened container must still put them on the wire.
+func TestAnthropicToAntigravityRequestKeepsSamplingControls(t *testing.T) {
+	decoded := antigravityRequestFor(t, "gemini-3.1-pro-high", `{
+		"model": "gemini-3.1-pro-high", "max_tokens": 64, "temperature": 0.4, "top_p": 0.9,
+		"messages": [{"role": "user", "content": [{"type": "text", "text": "go"}]}]
+	}`)
+
+	require.NotNil(t, decoded.Request.GenerationConfig.Temperature)
+	require.NotNil(t, decoded.Request.GenerationConfig.TopP)
+	assert.InDelta(t, 0.4, *decoded.Request.GenerationConfig.Temperature, 1e-9)
+	assert.InDelta(t, 0.9, *decoded.Request.GenerationConfig.TopP, 1e-9)
 }

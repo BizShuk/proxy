@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	ag "github.com/bizshuk/agentsdk/provider/antigravity"
 	authmodel "github.com/bizshuk/auth/model"
 	"github.com/bizshuk/proxy/model"
 	"github.com/bizshuk/proxy/model/anthropic"
@@ -392,9 +393,9 @@ func DefaultCatalog() (*Catalog, error) {
 				},
 			},
 			CredentialProvider:     ANTIGRAVITY_PROFILE_ID,
-			BaseURL:                ANTIGRAVITY_BASE_URL,
-			Endpoints:              map[model.Format]string{model.FORMAT_ANTIGRAVITY: ANTIGRAVITY_GENERATE_PATH},
-			StreamEndpoints:        map[model.Format]string{model.FORMAT_ANTIGRAVITY: ANTIGRAVITY_STREAM_PATH},
+			BaseURL:                ag.FallbackBaseURL,
+			Endpoints:              map[model.Format]string{model.FORMAT_ANTIGRAVITY: ag.PATH_GENERATE},
+			StreamEndpoints:        map[model.Format]string{model.FORMAT_ANTIGRAVITY: ag.PATH_STREAM},
 			Preferred:              model.FORMAT_ANTIGRAVITY,
 			AuthScheme:             AUTH_BEARER,
 			AllowedRequestHeaders:  slices.Clone(defaultRequestHeaders),
@@ -410,7 +411,7 @@ func DefaultCatalog() (*Catalog, error) {
 				"gemini-3.1-pro-high", "gemini-3.1-pro-low",
 				"gpt-oss-120b-medium",
 			},
-			NormalizeRequest: normalizeAntigravityRequest,
+			NormalizeRequest: preserveRequest,
 		},
 		{
 			ID:                 "google",

@@ -5,7 +5,7 @@ module.exports = {
             name: "LLM Proxy",
             script: "proxy",
             namespace: "Service",
-            instances: 1,
+            instances: 1
         }
-    ],
+    ]
 };

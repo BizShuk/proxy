@@ -30,11 +30,11 @@ func TestAntigravityProfileSplitsStreamEndpoint(t *testing.T) {
 
 	blocking, err := profile.ResolveGenerationEndpoint(model.FORMAT_ANTIGRAVITY, false)
 	require.NoError(t, err)
-	assert.Equal(t, ANTIGRAVITY_GENERATE_PATH, blocking)
+	assert.Equal(t, ag.PATH_GENERATE, blocking)
 
 	streaming, err := profile.ResolveGenerationEndpoint(model.FORMAT_ANTIGRAVITY, true)
 	require.NoError(t, err)
-	assert.Equal(t, ANTIGRAVITY_STREAM_PATH, streaming)
+	assert.Equal(t, ag.PATH_STREAM, streaming)
 	assert.Contains(t, streaming, "alt=sse")
 }
 
@@ -53,13 +53,13 @@ func TestResolveGenerationEndpointFallsBackToBlockingPath(t *testing.T) {
 // The endpoint's fixed query string has to survive URL construction, otherwise
 // the gateway answers with chunked JSON instead of SSE.
 func TestBuildEndpointURLKeepsFixedQuery(t *testing.T) {
-	built, err := buildEndpointURL(ANTIGRAVITY_BASE_URL, ANTIGRAVITY_STREAM_PATH)
+	built, err := buildEndpointURL(ag.FallbackBaseURL, ag.PATH_STREAM)
 	require.NoError(t, err)
-	assert.Equal(t, ANTIGRAVITY_BASE_URL+"/v1internal:streamGenerateContent?alt=sse", built)
+	assert.Equal(t, ag.FallbackBaseURL+"/v1internal:streamGenerateContent?alt=sse", built)
 }
 
 func TestBuildEndpointURLStillRejectsFragments(t *testing.T) {
-	_, err := buildEndpointURL(ANTIGRAVITY_BASE_URL, "/v1internal:generateContent#frag")
+	_, err := buildEndpointURL(ag.FallbackBaseURL, "/v1internal:generateContent#frag")
 	require.Error(t, err)
 }
 
@@ -73,47 +73,6 @@ func TestInjectAntigravityProjectStampsEnvelope(t *testing.T) {
 	assert.Equal(t, "projects/demo", envelope["project"])
 	assert.Equal(t, "gemini-3.1-pro-high", envelope["model"])
 	assert.Contains(t, envelope, "request")
-}
-
-// The gateway's Claude models reject tool arguments that skip upstream
-// validation; the Gemini families do not need the override.
-func TestNormalizeAntigravityRequestForcesValidatedToolMode(t *testing.T) {
-	body := []byte(`{"model":"claude-sonnet-4-6","request":{"contents":[],"tools":[{"functionDeclarations":[]}]}}`)
-
-	normalized, err := normalizeAntigravityRequest(model.RequestEnvelope{
-		TargetFormat: model.FORMAT_ANTIGRAVITY,
-		Model:        "claude-sonnet-4-6",
-		Body:         body,
-	})
-	require.NoError(t, err)
-	assert.Contains(t, string(normalized.Body), ANTIGRAVITY_TOOL_MODE_VALIDATED)
-
-	gemini, err := normalizeAntigravityRequest(model.RequestEnvelope{
-		TargetFormat: model.FORMAT_ANTIGRAVITY,
-		Model:        "gemini-3.1-pro-high",
-		Body:         body,
-	})
-	require.NoError(t, err)
-	assert.NotContains(t, string(gemini.Body), ANTIGRAVITY_TOOL_MODE_VALIDATED)
-}
-
-// Without tools there is nothing to validate, so the override must not appear.
-func TestNormalizeAntigravityRequestSkipsToolModeWithoutTools(t *testing.T) {
-	normalized, err := normalizeAntigravityRequest(model.RequestEnvelope{
-		TargetFormat: model.FORMAT_ANTIGRAVITY,
-		Model:        "claude-sonnet-4-6",
-		Body:         []byte(`{"model":"claude-sonnet-4-6","request":{"contents":[]}}`),
-	})
-	require.NoError(t, err)
-	assert.NotContains(t, string(normalized.Body), "toolConfig")
-}
-
-func TestNormalizeAntigravityRequestRejectsForeignFormat(t *testing.T) {
-	_, err := normalizeAntigravityRequest(model.RequestEnvelope{
-		TargetFormat: model.FORMAT_OPENAI_CHAT,
-		Body:         []byte(`{}`),
-	})
-	require.ErrorContains(t, err, "does not support format")
 }
 
 // Antigravity must claim only model IDs no other provider serves; a bare
@@ -143,7 +102,7 @@ func TestAntigravityRoutingDoesNotHijackOtherProviders(t *testing.T) {
 }
 
 func TestAntigravityProjectResolverPrefersCredentialProject(t *testing.T) {
-	resolver := newAntigravityProjectResolver()
+	resolver := newAntigravityProjects()
 
 	project, err := resolver.Resolve(context.Background(), &authmodel.Credential{
 		Provider: ANTIGRAVITY_PROFILE_ID, Kind: authmodel.KIND_OAUTH,
@@ -167,7 +126,7 @@ func TestAntigravityProjectResolverFetchesAndCaches(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resolver := newAntigravityProjectResolver()
+	resolver := newAntigravityProjects()
 	resolver.baseURL = server.URL
 	cred := &authmodel.Credential{
 		Provider: ANTIGRAVITY_PROFILE_ID, Kind: authmodel.KIND_OAUTH,
@@ -194,7 +153,7 @@ func TestAntigravityProjectResolverFallsBackToSentinelProject(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resolver := newAntigravityProjectResolver()
+	resolver := newAntigravityProjects()
 	resolver.baseURL = server.URL
 
 	project, err := resolver.Resolve(context.Background(), &authmodel.Credential{

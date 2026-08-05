@@ -52,6 +52,9 @@ const (
 	MODE_NONE = "NONE"
 	// MODE_ANY forces a tool call.
 	MODE_ANY = "ANY"
+	// MODE_VALIDATED validates arguments upstream; the gateway's Claude models
+	// require it and do not default to it.
+	MODE_VALIDATED = "VALIDATED"
 
 	// ROLE_USER is the Gemini caller role; Anthropic "system" folds into it.
 	ROLE_USER = "user"
