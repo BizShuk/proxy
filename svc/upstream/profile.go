@@ -68,11 +68,16 @@ type NormalizeRequest func(model.RequestEnvelope) (NormalizedRequest, error)
 
 // Profile describes one concrete upstream API surface.
 type Profile struct {
-	ID                             string
-	Routing                        route.Profile
-	CredentialProvider             string
-	BaseURL                        string
-	Endpoints                      map[model.Format]string
+	ID                 string
+	Routing            route.Profile
+	CredentialProvider string
+	BaseURL            string
+	Endpoints          map[model.Format]string
+	// StreamEndpoints overrides Endpoints when the caller wants SSE. Only
+	// providers that split generation across two paths (Gemini's
+	// generateContent vs streamGenerateContent) need it; everyone else streams
+	// from the same endpoint and leaves this nil.
+	StreamEndpoints                map[model.Format]string
 	ImageGenerationBaseURL         string
 	ImageGenerationEndpoint        string
 	ImageEditBaseURL               string
@@ -95,6 +100,17 @@ func (p Profile) ResolveEndpoint(format model.Format) (string, error) {
 		return "", unsupportedFormatError(p.ID, format)
 	}
 	return endpoint, nil
+}
+
+// ResolveGenerationEndpoint returns the endpoint for one generation call,
+// honoring a provider's separate streaming path when the caller wants SSE.
+func (p Profile) ResolveGenerationEndpoint(format model.Format, stream bool) (string, error) {
+	if stream {
+		if endpoint, ok := p.StreamEndpoints[format]; ok {
+			return endpoint, nil
+		}
+	}
+	return p.ResolveEndpoint(format)
 }
 
 // AllowsRequestHeader reports whether a downstream request header may be forwarded.
@@ -355,6 +371,46 @@ func DefaultCatalog() (*Catalog, error) {
 			),
 			AdvertisedModels: []string{"grok-"},
 			NormalizeRequest: normalizeXAIGrokOAuthRequest,
+		},
+		{
+			// Antigravity speaks Gemini generateContent wrapped in a routing
+			// envelope, so it is its own provider format rather than a variant
+			// of the public Gemini profile below.
+			ID: ANTIGRAVITY_PROFILE_ID,
+			Routing: route.Profile{
+				ID:         ANTIGRAVITY_PROFILE_ID,
+				Qualifiers: []string{ANTIGRAVITY_PROFILE_ID},
+				// Only IDs the public Gemini/Anthropic APIs never serve are
+				// claimed by bare name; everything else needs the
+				// `antigravity/` qualifier so this profile cannot hijack a
+				// model another provider owns.
+				ExactModels: []string{
+					"gemini-3.6-flash-high", "gemini-3.6-flash-medium", "gemini-3.6-flash-low",
+					"gemini-3.5-flash-high", "gemini-3.5-flash-medium", "gemini-3.5-flash-low",
+					"gemini-3.1-pro-high", "gemini-3.1-pro-low",
+					"gpt-oss-120b-medium",
+				},
+			},
+			CredentialProvider:     ANTIGRAVITY_PROFILE_ID,
+			BaseURL:                ANTIGRAVITY_BASE_URL,
+			Endpoints:              map[model.Format]string{model.FORMAT_ANTIGRAVITY: ANTIGRAVITY_GENERATE_PATH},
+			StreamEndpoints:        map[model.Format]string{model.FORMAT_ANTIGRAVITY: ANTIGRAVITY_STREAM_PATH},
+			Preferred:              model.FORMAT_ANTIGRAVITY,
+			AuthScheme:             AUTH_BEARER,
+			AllowedRequestHeaders:  slices.Clone(defaultRequestHeaders),
+			AllowedResponseHeaders: slices.Clone(defaultResponseHeaders),
+			// Only bare-name-routable IDs are advertised. Antigravity's
+			// claude-* models are reachable as `antigravity/claude-sonnet-4-6`
+			// but are deliberately not listed: a bare claude- name routes to
+			// Anthropic, so advertising them here would hand callers a model
+			// string that lands somewhere else.
+			AdvertisedModels: []string{
+				"gemini-3.6-flash-high", "gemini-3.6-flash-medium", "gemini-3.6-flash-low",
+				"gemini-3.5-flash-high", "gemini-3.5-flash-medium", "gemini-3.5-flash-low",
+				"gemini-3.1-pro-high", "gemini-3.1-pro-low",
+				"gpt-oss-120b-medium",
+			},
+			NormalizeRequest: normalizeAntigravityRequest,
 		},
 		{
 			ID:                 "google",

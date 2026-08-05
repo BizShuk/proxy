@@ -26,11 +26,12 @@ const (
 
 // Client sends sanitized, context-bound requests to concrete provider profiles.
 type Client struct {
-	httpClient         *http.Client
-	imageHTTPClient    *http.Client
-	messagesTimeout    time.Duration
-	streamTimeout      time.Duration
-	countTokensTimeout time.Duration
+	httpClient          *http.Client
+	imageHTTPClient     *http.Client
+	messagesTimeout     time.Duration
+	streamTimeout       time.Duration
+	countTokensTimeout  time.Duration
+	antigravityProjects *antigravityProjectResolver
 }
 
 // NewClient clones an injected HTTP client and applies proxy timeout policy.
@@ -71,17 +72,22 @@ func NewClient(httpClient *http.Client, cfg TimeoutConfig) (*Client, error) {
 	}
 
 	return &Client{
-		httpClient:         &clone,
-		imageHTTPClient:    &imageClone,
-		messagesTimeout:    time.Duration(cfg.MessagesMs) * time.Millisecond,
-		streamTimeout:      time.Duration(cfg.StreamMessagesMs) * time.Millisecond,
-		countTokensTimeout: time.Duration(cfg.CountTokensMs) * time.Millisecond,
+		httpClient:          &clone,
+		imageHTTPClient:     &imageClone,
+		messagesTimeout:     time.Duration(cfg.MessagesMs) * time.Millisecond,
+		streamTimeout:       time.Duration(cfg.StreamMessagesMs) * time.Millisecond,
+		countTokensTimeout:  time.Duration(cfg.CountTokensMs) * time.Millisecond,
+		antigravityProjects: newAntigravityProjectResolver(),
 	}, nil
 }
 
 // Do sends one model request to the endpoint selected by the target format.
 func (c *Client) Do(ctx context.Context, profile Profile, cred *authmodel.Credential, envelope model.RequestEnvelope) (*http.Response, error) {
-	endpoint, err := profile.ResolveEndpoint(envelope.TargetFormat)
+	endpoint, err := profile.ResolveGenerationEndpoint(envelope.TargetFormat, envelope.Stream)
+	if err != nil {
+		return nil, err
+	}
+	envelope, err = c.applyCredentialBody(ctx, profile, cred, envelope)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +96,33 @@ func (c *Client) Do(ctx context.Context, profile Profile, cred *authmodel.Creden
 		timeout = c.streamTimeout
 	}
 	return c.do(ctx, profile, cred, envelope, endpoint, timeout, envelope.Stream)
+}
+
+// applyCredentialBody fills in request fields that only the credential can
+// supply. Antigravity's envelope carries the caller's Cloud Code project, which
+// the protocol transform has no access to.
+func (c *Client) applyCredentialBody(
+	ctx context.Context,
+	profile Profile,
+	cred *authmodel.Credential,
+	envelope model.RequestEnvelope,
+) (model.RequestEnvelope, error) {
+	if profile.ID != ANTIGRAVITY_PROFILE_ID {
+		return envelope, nil
+	}
+	if err := validateCredentialForProfile(profile, cred); err != nil {
+		return model.RequestEnvelope{}, err
+	}
+	project, err := c.antigravityProjects.Resolve(ctx, cred)
+	if err != nil {
+		return model.RequestEnvelope{}, err
+	}
+	body, err := injectAntigravityProject(envelope.Body, project)
+	if err != nil {
+		return model.RequestEnvelope{}, err
+	}
+	envelope.Body = body
+	return envelope, nil
 }
 
 // CountTokens sends one request to a profile's native token-count endpoint.
@@ -300,11 +333,20 @@ func buildEndpointURL(baseURL, endpoint string) (string, error) {
 	if scheme != "https" && !(scheme == "http" && loopbackHost(parsed.Hostname())) {
 		return "", fmt.Errorf("base URL must use HTTPS or loopback HTTP")
 	}
-	if !strings.HasPrefix(endpoint, "/") || strings.ContainsAny(endpoint, "?#") {
+	if !strings.HasPrefix(endpoint, "/") || strings.Contains(endpoint, "#") {
 		return "", fmt.Errorf("endpoint must be a fixed absolute path")
 	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + strings.TrimLeft(endpoint, "/")
+	// Endpoints are profile constants, never request-derived, so a fixed query
+	// string (Gemini's alt=sse switch) is safe as long as it parses.
+	path, rawQuery, _ := strings.Cut(endpoint, "?")
+	if rawQuery != "" {
+		if _, err := url.ParseQuery(rawQuery); err != nil {
+			return "", fmt.Errorf("endpoint query is malformed: %w", err)
+		}
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + strings.TrimLeft(path, "/")
 	parsed.RawPath = ""
+	parsed.RawQuery = rawQuery
 	return parsed.String(), nil
 }
 
@@ -369,6 +411,13 @@ func applyProviderHeaders(profile Profile, cred *authmodel.Credential, header ht
 		if strings.TrimSpace(cred.AccountID) != "" {
 			header.Set("ChatGPT-Account-ID", cred.AccountID)
 		}
+	}
+	if profile.ID == ANTIGRAVITY_PROFILE_ID {
+		// The Cloud Code gateway gates on IDE identity, not just the token.
+		header.Set("User-Agent", antigravityUserAgent())
+		header.Set("X-Client-Name", ANTIGRAVITY_CLIENT_NAME)
+		header.Set("X-Client-Version", ANTIGRAVITY_CLIENT_VERSION)
+		header.Set("x-goog-api-client", ANTIGRAVITY_GOOG_API_CLIENT)
 	}
 }
 

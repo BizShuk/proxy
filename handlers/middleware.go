@@ -40,8 +40,24 @@ func extractAPIKey(r *http.Request) string {
 	if v := r.Header.Get("x-api-key"); v != "" {
 		return strings.TrimSpace(v)
 	}
+	if v := r.Header.Get("api-key"); v != "" {
+		return strings.TrimSpace(v)
+	}
 	if v := r.Header.Get("Authorization"); v != "" {
-		return strings.TrimSpace(strings.TrimPrefix(v, "Bearer "))
+		v = strings.TrimSpace(v)
+		if len(v) >= 7 && strings.EqualFold(v[:7], "bearer ") {
+			return strings.TrimSpace(v[7:])
+		}
+		return v
+	}
+	if v := r.URL.Query().Get("api_key"); v != "" {
+		return strings.TrimSpace(v)
+	}
+	if v := r.URL.Query().Get("key"); v != "" {
+		return strings.TrimSpace(v)
+	}
+	if v := r.URL.Query().Get("api-key"); v != "" {
+		return strings.TrimSpace(v)
 	}
 	return ""
 }
@@ -51,7 +67,7 @@ func validKey(keys map[string]struct{}, key string) bool {
 	// timing; subtle.ConstantTimeCompare keeps the check uniform per key.
 	match := 0
 	for k := range keys {
-		if subtle.ConstantTimeCompare([]byte(k), []byte(key)) == 1 {
+		if k != "" && subtle.ConstantTimeCompare([]byte(k), []byte(key)) == 1 {
 			match = 1
 		}
 	}

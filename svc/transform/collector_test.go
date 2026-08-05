@@ -74,7 +74,7 @@ func TestAnthropicCollectorPushErrorFrame(t *testing.T) {
 		require.NoError(t, err)
 		err = collector.Push(context.Background(), model.SSEFrame{
 			Event: "error",
-			Data: []byte(`{"type":"error","error":{"type":"upstream_error","message":"boom","code":"context_overflow"}}`),
+			Data:  []byte(`{"type":"error","error":{"type":"upstream_error","message":"boom","code":"context_overflow"}}`),
 		})
 		var proxyErr *model.ProxyError
 		require.ErrorAs(t, err, &proxyErr)

@@ -14,5 +14,10 @@ func NewDefaultRegistry() (*Registry, error) {
 		newPair(model.FORMAT_OPENAI_RESPONSES, model.FORMAT_ANTHROPIC_MESSAGES, ResponsesToAnthropicRequest, AnthropicToResponsesResponse, NewAnthropicToResponsesStream),
 		newPair(model.FORMAT_OPENAI_RESPONSES, model.FORMAT_OPENAI_CHAT, ResponsesToChatRequest, ChatToResponsesResponse, NewChatToResponsesStream),
 		ResponsesIdentity(),
+		// Antigravity is provider-only: it is a target, never a client source.
+		// Only Anthropic Messages can reach it today; other clients get an
+		// explicit unsupported-pair error from the handler instead of a
+		// silently degraded translation.
+		newPair(model.FORMAT_ANTHROPIC_MESSAGES, model.FORMAT_ANTIGRAVITY, AnthropicToAntigravityRequest, AntigravityToAnthropicResponse, NewAntigravityToAnthropicStream),
 	)
 }

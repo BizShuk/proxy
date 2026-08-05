@@ -43,6 +43,60 @@ func TestRequireAPIKey(t *testing.T) {
 			expectLog:      false,
 		},
 		{
+			name: "Valid Authorization lowercase bearer",
+			setupHeaders: func(req *http.Request) {
+				req.Header.Set("Authorization", "bearer test-key-2")
+			},
+			expectedStatus: http.StatusOK,
+			expectLog:      false,
+		},
+		{
+			name: "Valid Authorization token without Bearer prefix",
+			setupHeaders: func(req *http.Request) {
+				req.Header.Set("Authorization", "test-key-2")
+			},
+			expectedStatus: http.StatusOK,
+			expectLog:      false,
+		},
+		{
+			name: "Valid api-key header",
+			setupHeaders: func(req *http.Request) {
+				req.Header.Set("api-key", "test-key-1")
+			},
+			expectedStatus: http.StatusOK,
+			expectLog:      false,
+		},
+		{
+			name: "Valid query param api_key",
+			setupHeaders: func(req *http.Request) {
+				q := req.URL.Query()
+				q.Set("api_key", "test-key-1")
+				req.URL.RawQuery = q.Encode()
+			},
+			expectedStatus: http.StatusOK,
+			expectLog:      false,
+		},
+		{
+			name: "Valid query param key",
+			setupHeaders: func(req *http.Request) {
+				q := req.URL.Query()
+				q.Set("key", "test-key-2")
+				req.URL.RawQuery = q.Encode()
+			},
+			expectedStatus: http.StatusOK,
+			expectLog:      false,
+		},
+		{
+			name: "Valid query param api-key",
+			setupHeaders: func(req *http.Request) {
+				q := req.URL.Query()
+				q.Set("api-key", "test-key-1")
+				req.URL.RawQuery = q.Encode()
+			},
+			expectedStatus: http.StatusOK,
+			expectLog:      false,
+		},
+		{
 			name: "Missing API Key",
 			setupHeaders: func(req *http.Request) {
 				// No headers

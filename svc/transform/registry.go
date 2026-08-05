@@ -39,11 +39,34 @@ func NewRegistry(pairs ...Pair) (*Registry, error) {
 		registered[key] = pair
 	}
 
-	for _, from := range model.ALL_FORMATS {
-		for _, to := range model.ALL_FORMATS {
+	for _, from := range model.CLIENT_FORMATS {
+		if !from.ClientFacing() {
+			continue
+		}
+		for _, to := range model.CLIENT_FORMATS {
 			if _, exists := registered[pairKey{from: from, to: to}]; !exists {
 				return nil, fmt.Errorf("transform registry: missing pair %s -> %s", from, to)
 			}
+		}
+	}
+	// Provider-only formats are upstream targets, never client sources, so they
+	// need no row. They do need at least one client able to reach them —
+	// otherwise the format is dead weight that routing can never select.
+	for _, to := range model.PROVIDER_FORMATS {
+		reachable := false
+		for _, from := range model.CLIENT_FORMATS {
+			if _, exists := registered[pairKey{from: from, to: to}]; exists {
+				reachable = true
+				break
+			}
+		}
+		if !reachable {
+			return nil, fmt.Errorf("transform registry: provider format %s has no client source", to)
+		}
+	}
+	for key := range registered {
+		if !key.from.ClientFacing() {
+			return nil, fmt.Errorf("transform registry: %s is provider-only and cannot be a source", key.from)
 		}
 	}
 	return &Registry{pairs: registered}, nil

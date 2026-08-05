@@ -27,10 +27,13 @@ func noOpPair(from, to model.Format) Pair {
 
 func TestNewRegistryRequiresNineUniqueCompletePairs(t *testing.T) {
 	var pairs []Pair
-	for _, from := range model.ALL_FORMATS {
-		for _, to := range model.ALL_FORMATS {
+	for _, from := range model.CLIENT_FORMATS {
+		for _, to := range model.CLIENT_FORMATS {
 			pairs = append(pairs, noOpPair(from, to))
 		}
+	}
+	for _, to := range model.PROVIDER_FORMATS {
+		pairs = append(pairs, noOpPair(model.FORMAT_ANTHROPIC_MESSAGES, to))
 	}
 
 	registry, err := NewRegistry(pairs...)
@@ -47,6 +50,38 @@ func TestNewRegistryRequiresNineUniqueCompletePairs(t *testing.T) {
 	nilRequest[0].Request = nil
 	_, err = NewRegistry(nilRequest...)
 	require.ErrorContains(t, err, "nil request")
+}
+
+// A provider-only format has no client decoder, so registering it as a source
+// is a wiring bug the registry must reject rather than quietly accept.
+func TestNewRegistryRejectsProviderFormatAsSource(t *testing.T) {
+	var pairs []Pair
+	for _, from := range model.CLIENT_FORMATS {
+		for _, to := range model.CLIENT_FORMATS {
+			pairs = append(pairs, noOpPair(from, to))
+		}
+	}
+	pairs = append(pairs, noOpPair(model.FORMAT_ANTHROPIC_MESSAGES, model.FORMAT_ANTIGRAVITY))
+
+	_, err := NewRegistry(pairs...)
+	require.NoError(t, err)
+
+	_, err = NewRegistry(append(pairs, noOpPair(model.FORMAT_ANTIGRAVITY, model.FORMAT_ANTHROPIC_MESSAGES))...)
+	require.ErrorContains(t, err, "provider-only")
+}
+
+// Declaring a provider format without any client able to reach it leaves dead
+// routing surface, so construction must fail instead of shipping it.
+func TestNewRegistryRequiresProviderFormatReachable(t *testing.T) {
+	var pairs []Pair
+	for _, from := range model.CLIENT_FORMATS {
+		for _, to := range model.CLIENT_FORMATS {
+			pairs = append(pairs, noOpPair(from, to))
+		}
+	}
+
+	_, err := NewRegistry(pairs...)
+	require.ErrorContains(t, err, "no client source")
 }
 
 type terminalTestStream struct{}

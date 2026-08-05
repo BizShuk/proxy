@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/bizshuk/proxy/svc/upstream"
 	gosdkconfig "github.com/bizshuk/gosdk/config"
+	"github.com/bizshuk/proxy/svc/upstream"
 	"github.com/spf13/viper"
 )
 

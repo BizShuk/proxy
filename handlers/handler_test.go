@@ -754,7 +754,16 @@ func TestHandlerModelsUsesCatalog(t *testing.T) {
 	for _, item := range payload.Data {
 		models = append(models, item.ID)
 	}
-	assert.Equal(t, []string{"MiniMax-Text-01", "claude-", "gemini-", "gemma-", "gpt-", "grok-", "imagen-", "minimax-", "o1-", "o3-"}, models)
+	assert.Equal(t, []string{
+		"MiniMax-Text-01", "claude-", "gemini-",
+		// Antigravity advertises exact model IDs rather than a prefix: its
+		// gemini-* builds are tier-suffixed variants the public Gemini API
+		// does not serve.
+		"gemini-3.1-pro-high", "gemini-3.1-pro-low",
+		"gemini-3.5-flash-high", "gemini-3.5-flash-low", "gemini-3.5-flash-medium",
+		"gemini-3.6-flash-high", "gemini-3.6-flash-low", "gemini-3.6-flash-medium",
+		"gemma-", "gpt-", "gpt-oss-120b-medium", "grok-", "imagen-", "minimax-", "o1-", "o3-",
+	}, models)
 }
 
 func TestHandlerCountTokensUsesNativeAnthropicCapability(t *testing.T) {
