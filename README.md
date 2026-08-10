@@ -169,7 +169,7 @@ Realtime 語音不是第四種 request/response format，而是持續存在的�
 
 完整協定、failure semantics 與驗收證據：
 
-📄 [`docs/plans/2026-07-26-gpt-realtime-voice-proxy.md`](docs/plans/2026-07-26-gpt-realtime-voice-proxy.md)
+📄 [`plans/2026-07-26-gpt-realtime-voice-proxy.md`](plans/2026-07-26-gpt-realtime-voice-proxy.md)
 
 ---
 
