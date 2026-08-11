@@ -44,7 +44,6 @@
 .DS_Store?
 .**
 !.dockerignore
-!.github/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
