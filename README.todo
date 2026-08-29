@@ -14,13 +14,6 @@ summary 必須編碼為 `summary: []`，由
 - [x] 擴充 reasoning round-trip test matrix：empty/non-empty summary × streaming/non-streaming × `openai-api`/`openai-codex-oauth` normalizer，並斷言 message/function item 不會多出 `summary`
 - [x] 新增 handler-level two-turn regression test：mock upstream 首輪回傳 `summary: []` + `encrypted_content` + function call，次輪收到 Anthropic tool result 時必須送出合法 reasoning replay 並完成 2xx
 - [x] 稽核 Responses reasoning replay 的完整欄位集合；若 `status`、`content` 或新 opaque fields 必須跨 Anthropic transport 保存，升級 versioned signature envelope 並保持 v1 decode compatibility
-- [ ] Review 後 build/install 新 binary、以 `pm2 task restart "LLM Proxy"` 部署，再執行 opt-in `gpt-5.6-sol` tool-loop live acceptance；確認不再出現 `missing_required_parameter`，並保留舊 binary 作 rollback
-
-## GPT Realtime Voice
-
-- [ ] Add isolated WebSocket upgrade and WebRTC handshake integration tests
-- [ ] Run one live `gpt-realtime-2.1` audio session through each supported transport
-- [ ] Add active Realtime connection and handshake failure metrics
 
 ## Sensitive Header Redaction
 
@@ -43,8 +36,6 @@ summary 必須編碼為 `summary: []`，由
 - [ ] `handlers/codex_log.go` 的 payload 欄位 allow-list 同屬可下沉項，但屬 body 層、獨立提案，不與 header 脫敏綁同一個 PR
 - [ ] `svc/transform/` 維持 pairwise 不上移；前置條件是 agentsdk `core.Part` 先支援 reasoning kind 與 `encrypted_content`，否則繞經 core 會靜默丟失 Anthropic `thinking` 與 Responses `reasoning`
 - [ ] `Dispatcher.Replace` 已脫離 token-refresh 路徑（decorator 每次呼叫重新解析），目前只剩測試在用，評估移除
-
-## Archive
 
 ## Archive
 
