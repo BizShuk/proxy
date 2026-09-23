@@ -1,45 +1,29 @@
 # TODO
 
-- [ ] move realtime to agentsdk
-- [ ] claude /fork can't read the AGENTSDK_PROXY_API_KEY
+## Architecture
 
-## Responses Reasoning Replay
+- [ ] [P0] [bug] claude /fork can't read the AGENTSDK_PROXY_API_KEY
+- [ ] [P1] [refactor] move realtime to agentsdk
+- [ ] [P1] [refactor] agentsdk 新增 `provider/redact` 套件：`Set` 型別 + `Baseline()` + `Set.Header()` 遮罩（保留 key，值換 `[REDACTED]`）
+- [ ] [P1] [feature] agentsdk `provider.Metadata` 加 `SecretHeaders []string`，宣告與 `Header.Set` 同檔；補 registry 完整性測試讓漏宣告在 CI 失敗
+- [ ] [P1] [feature] agentsdk `core.Auth` 加 `SecretHeaderNames()`，補上 `Auth.Headers` 開放 map 那層
+- [ ] [P1] [refactor] proxy 接上 `redact.FromRegistry().With(auth.SecretHeaderNames()...)`，刪除 `sensitiveHeaders` 與 `filterResponseHeaders`
+- [ ] [P1] [chore] `handlers/codex_log.go` 的 payload 欄位 allow-list 同屬可下沉項，但屬 body 層、獨立提案，不與 header 脫敏綁同一個 PR
+- [ ] [P2] [refactor] `svc/transform/` 維持 pairwise 不上移；前置條件是 agentsdk `core.Part` 先支援 reasoning kind 與 `encrypted_content`，否則繞經 core 會靜默丟失 Anthropic `thinking` 與 Responses `reasoning`
+- [ ] [P2] [refactor] `Dispatcher.Replace` 已脫離 token-refresh 路徑（decorator 每次呼叫重新解析），目前只剩測試在用，評估移除
+- [ ] [P2] [chore] `Profile.AllowedResponseHeaders`（轉發用 allow-list）維持不動 — 與 log deny-list 回答不同問題，不收斂成單一 policy
 
-規則：stateless Responses replay 必須保留 reasoning item 的必要欄位；空 reasoning
-summary 必須編碼為 `summary: []`，由
-`TestAnthropicToResponsesPreservesEmptyReasoningSummary` 鎖定。
+## Archive
 
 - [x] 最小修正：讓 `responses.InputItem.Summary` 在 encoding 時區分 absent 與 present-empty，並在 Anthropic 空 `thinking` 轉換時保留 `summary: []`
 - [x] 在 `responses.DecodeInput` 加入 presence-aware variant validation；`type: reasoning` 缺少、為 `null` 或不是 array 的 `summary` 應在 proxy 內回報帶 `input[index].summary` 的 invalid-request error，不送 upstream
 - [x] 擴充 reasoning round-trip test matrix：empty/non-empty summary × streaming/non-streaming × `openai-api`/`openai-codex-oauth` normalizer，並斷言 message/function item 不會多出 `summary`
 - [x] 新增 handler-level two-turn regression test：mock upstream 首輪回傳 `summary: []` + `encrypted_content` + function call，次輪收到 Anthropic tool result 時必須送出合法 reasoning replay 並完成 2xx
 - [x] 稽核 Responses reasoning replay 的完整欄位集合；若 `status`、`content` 或新 opaque fields 必須跨 Anthropic transport 保存，升級 versioned signature envelope 並保持 v1 decode compatibility
-
-## Sensitive Header Redaction
-
-把 `handlers/upstream_error_log.go` 的 8 鍵 `sensitiveHeaders` deny-list 下沉到 agentsdk。
-現有形狀對 `core.Auth.Headers`（開放 map，key 來自憑證資料）結構上失效 — 見
-`provider/codex/provider.go:308` 的 `for k, v := range a.Headers`。
-設計：`redact.Set` 三層來源（RFC baseline / provider 宣告 / 執行期 Auth key）。
-
-- [ ] agentsdk 新增 `provider/redact` 套件：`Set` 型別 + `Baseline()` + `Set.Header()` 遮罩（保留 key，值換 `[REDACTED]`）
-- [ ] agentsdk `provider.Metadata` 加 `SecretHeaders []string`，宣告與 `Header.Set` 同檔；補 registry 完整性測試讓漏宣告在 CI 失敗
-- [ ] agentsdk `core.Auth` 加 `SecretHeaderNames()`，補上 `Auth.Headers` 開放 map 那層
-- [ ] proxy 接上 `redact.FromRegistry().With(auth.SecretHeaderNames()...)`，刪除 `sensitiveHeaders` 與 `filterResponseHeaders`
-- [ ] `Profile.AllowedResponseHeaders`（轉發用 allow-list）維持不動 — 與 log deny-list 回答不同問題，不收斂成單一 policy
-
-## agentsdk Component Handover
-
 - [x] agentsdk 已於 `v0.0.19` 公開 stdlib-only `provider/protocol/sse`，並於 `v0.0.24` 完成 provider consumer migration；設計見 [`docs/specs/2026-07-28-agentsdk-protocol-handover.md`](docs/specs/2026-07-28-agentsdk-protocol-handover.md)
 - [x] agentsdk 已於 `v0.0.17` 公開 `provider/protocol/openaichat`；評估結論是它屬 `core.Model*` adapter projection，不能取代 proxy 的 lossless `model/chat/types.go`
 - [x] proxy 已升至 `agentsdk v0.0.24`，以 compatibility alias / wrapper 採用 `provider/protocol/sse` 並移除 `model/sse.go` 的重複實作
-- [ ] `handlers/codex_log.go` 的 payload 欄位 allow-list 同屬可下沉項，但屬 body 層、獨立提案，不與 header 脫敏綁同一個 PR
-- [ ] `svc/transform/` 維持 pairwise 不上移；前置條件是 agentsdk `core.Part` 先支援 reasoning kind 與 `encrypted_content`，否則繞經 core 會靜默丟失 Anthropic `thinking` 與 Responses `reasoning`
-- [ ] `Dispatcher.Replace` 已脫離 token-refresh 路徑（decorator 每次呼叫重新解析），目前只剩測試在用，評估移除
-
-## Archive
-
-- [x] 2026-07-27 — 完成 Codex / Claude Code `generate_image` MCP tool，呼叫 proxy `POST /v1/images/generations`
+- [x] 2026-07-27 — 完成 Codex / Claude Code `generate_image` MCP tool，呼叫 proxy `POST /v1/images/generations` — see [docs/specs/2026-07-27-xai-image-generation.md](docs/specs/2026-07-27-xai-image-generation.md)
 - [x] 2026-07-27 — 加入 `/imagine <prompt>` Skill，原樣把 `$ARGUMENTS` 交給 `generate_image`
 - [x] 2026-07-27 — MCP tool 固定要求 `b64_json`、驗證並儲存至 project `images/`，回傳 image content 與相對路徑
 - [x] 2026-07-27 — 完成 xAI API key / OAuth 的 `POST /v1/images/generations` proxy protocol
