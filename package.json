@@ -10,7 +10,7 @@
     "deploy": "go install .",
     "lint": "gofmt -l . && go vet ./...",
     "clean": "rm -rf bin",
-    "destroy": "pm2 delete \"LLM Proxy\"",
+    "destroy": "pm2 delete \"LLM Proxy - Always\"",
     "ci": "npm run lint && npm run test && npm run build"
   }
 }

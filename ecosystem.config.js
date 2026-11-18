@@ -2,7 +2,7 @@ module.exports = {
     apps: [
         // Long-running LLM proxy routing Claude/Codex requests to providers, registered paused.
         {
-            name: "LLM Proxy",
+            name: "LLM Proxy - Always",
             script: "proxy",
             namespace: "Service",
             instances: 1,
