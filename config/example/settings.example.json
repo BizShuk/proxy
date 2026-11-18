@@ -4,9 +4,6 @@
     "port": 8317
   },
   "auth-dir": "",
-  "api-keys": [
-    "xyz"
-  ],
   "body-limit-mb": 200,
   "timeouts": {
     "messages-ms": 120000,

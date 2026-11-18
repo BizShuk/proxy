@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/bizshuk/agentsdk v0.0.50
 	github.com/bizshuk/auth v0.0.2
-	github.com/bizshuk/gosdk v1.3.27
+	github.com/bizshuk/gosdk v1.3.28
 	github.com/gin-gonic/gin v1.11.0
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.6.0

@@ -15,7 +15,7 @@ proxy/
 │   └── image_mcp.go              # proxy image-mcp; stdio MCP entry
 ├── config/
 │   ├── config.go                 # Config struct + LoadConfig (gosdk viper, APP_NAME="agentSDK")
-│   └── example/                  # settings.example.json (host/port/auth-dir/api-keys/timeouts/...), `config default` 複製到設定目錄
+│   └── example/                  # settings.example.json (host/port/auth-dir/timeouts/...; 不含 api-keys, 未設時啟動自動產生), `config default` 複製到設定目錄
 ├── mcpimage/                     # Codex / Claude Code 共用圖片 MCP server
 │   ├── config.go                 # base URL / port / API key / model / output 設定
 │   ├── client.go                 # POST /v1/images/generations + Base64 解碼

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	_ "github.com/bizshuk/proxy/config/example"
+	"github.com/bizshuk/proxy/config/example"
 
 	gosdkconfig "github.com/bizshuk/gosdk/config"
 	"github.com/bizshuk/proxy/svc/upstream"
@@ -57,10 +57,10 @@ type RealtimeConfig struct {
 // LoadConfig runs gosdk's config.Default (which merges settings.json →
 // settings.local.json into the global viper, plus APP_* env override for
 // keys whose flat form is a valid env name) and unmarshals the result
-// into a typed Config, applying defaults for any unset field.
+// into a typed Config. Defaults come from config/example/settings.example.json
+// (the WithDefaultValue layer); api-keys has none, so a first run mints one.
 func LoadConfig() (*Config, error) {
-	setDefaults()
-	gosdkconfig.Default(gosdkconfig.WithAppName(APP_NAME))
+	gosdkconfig.Default(gosdkconfig.WithAppName(APP_NAME), gosdkconfig.WithDefaultValue(string(example.Settings)))
 
 	cfg := &Config{}
 	if err := viper.Unmarshal(cfg); err != nil {
@@ -72,20 +72,6 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
-}
-
-func setDefaults() {
-	viper.SetDefault("server.host", "")
-	viper.SetDefault("server.port", 8317)
-	viper.SetDefault("auth-dir", "")
-	viper.SetDefault("body-limit-mb", 200)
-	viper.SetDefault("timeouts.messages-ms", 120000)
-	viper.SetDefault("timeouts.stream-messages-ms", 600000)
-	viper.SetDefault("timeouts.count-tokens-ms", 30000)
-	viper.SetDefault("realtime.enabled", true)
-	viper.SetDefault("realtime.max-connections", 32)
-	viper.SetDefault("realtime.max-handshake-bytes", 1<<20)
-	viper.SetDefault("stats.enabled", true)
 }
 
 // ensureAPIKey mirrors the TS behaviour: if no api-keys are configured, mint
