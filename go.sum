@@ -8,8 +8,8 @@ github.com/bizshuk/agentsdk v0.0.50 h1:7RVMd5/H/YKNiYw8hewLiG6y90HcTSK+xGIkigfsW
 github.com/bizshuk/agentsdk v0.0.50/go.mod h1:rTCHiKFLc1GSGyTm2nndRpwbgMQctFYJQMPOgRxcOwo=
 github.com/bizshuk/auth v0.0.2 h1:tqrV+NitnuLmhdp6wAaV8ZaPOSMy7sooTcJBzxzFHyI=
 github.com/bizshuk/auth v0.0.2/go.mod h1:1H8HFjZvMkKV/bxm4EkliclcAvRQqAocGfoquLrLq8s=
-github.com/bizshuk/gosdk v1.3.5 h1:2tqLJsQ6DQ8H90/wBptJusrqpr5MXAc3q1Gfagm1bS0=
-github.com/bizshuk/gosdk v1.3.5/go.mod h1:vxL6J+cB/pBLQtmmv4B/i56e5DUsVGBEUANU3+LpB5k=
+github.com/bizshuk/gosdk v1.3.27 h1:ZUsoT3zuMd0/0fHHsJp9hu5hldN13SMqvP58RwLe9RU=
+github.com/bizshuk/gosdk v1.3.27/go.mod h1:EqyGgu1mgQ2JGFglktrR+8oaDJZwAKz1ABk4mu4V2eM=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
@@ -62,8 +62,6 @@ github.com/go-redis/redismock/v9 v9.0.3 h1:mtHQi2l51lCmXIbTRTqb1EiHYe9tL5Yk5oorl
 github.com/go-redis/redismock/v9 v9.0.3/go.mod h1:F6tJRfnU8R/NZ0E+Gjvoluk14MqMC5ueSZX6vVQypc0=
 github.com/go-viper/mapstructure/v2 v2.5.0 h1:vM5IJoUAy3d7zRSVtIwQgBj7BiWtMPfmPEgAXnvj1Ro=
 github.com/go-viper/mapstructure/v2 v2.5.0/go.mod h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=
-github.com/gocarina/gocsv v0.0.0-20260628180327-50907998929c h1:kC7cxFK96H9RaTVHtnYXSWEGFmO9UBxclb/4/8EPjHA=
-github.com/gocarina/gocsv v0.0.0-20260628180327-50907998929c/go.mod h1:5YoVOkjYAQumqlV356Hj3xeYh4BdZuLE0/nRkf2NKkI=
 github.com/goccy/go-json v0.10.5 h1:Fq85nIqj+gXn/S5ahsiTlK3TmC85qgirsdTP/+DeaC4=
 github.com/goccy/go-json v0.10.5/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
 github.com/goccy/go-yaml v1.19.2 h1:PmFC1S6h8ljIz6gMRBopkjP1TVT7xuwrButHID66PoM=
@@ -155,6 +153,8 @@ github.com/tavsec/gin-healthcheck v1.2.2/go.mod h1:SmJHuSAqIxZ6iX6YTPqK0hPx4tgmt
 github.com/tidwall/gjson v1.14.2/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
 github.com/tidwall/gjson v1.19.0 h1:xwxm7n691Uf3u5OFjzngavjGTh55KX5q/9w9xHW88JU=
 github.com/tidwall/gjson v1.19.0/go.mod h1:V37/opeE/JbLUOfH0QTXiNez2l0RUjYUhpT4szFQAfc=
+github.com/tidwall/jsonc v0.3.3 h1:RVQqL3xFfDkKKXIDsrBiVQiEpBtxoKbmMXONb2H/y2w=
+github.com/tidwall/jsonc v0.3.3/go.mod h1:dw+3CIxqHi+t8eFSpzzMlcVYxKp08UP5CD8/uSFCyJE=
 github.com/tidwall/match v1.1.1/go.mod h1:eRSPERbgtNPcGhD8UCthc6PmLEQXEWd3PRB5JTxsfmM=
 github.com/tidwall/match v1.2.0 h1:0pt8FlkOwjN2fPt4bIl4BoNxb98gGHN2ObFEDkrfZnM=
 github.com/tidwall/match v1.2.0/go.mod h1:eRSPERbgtNPcGhD8UCthc6PmLEQXEWd3PRB5JTxsfmM=
@@ -203,6 +203,8 @@ golang.org/x/sync v0.22.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
 golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
 golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+golang.org/x/term v0.45.0 h1:NwWyBmoJCbfTHpxrWoZ9C6/VxOf7ic219I8xZZFdrf0=
+golang.org/x/term v0.45.0/go.mod h1:9aqxs0blBcrm/n0L9QW0aRVD+ktan8ssZromtqJC43w=
 golang.org/x/text v0.40.0 h1:Ub2Z6/xjgF1WrYQz2nuITOEegKFtiIy+rieRJ5lHZKs=
 golang.org/x/text v0.40.0/go.mod h1:hpnzDAfGV753zIKo+wk3u1bVKCGPbrnF7+7LBF/UHVY=
 golang.org/x/tools v0.47.0 h1:7Kn5x/d1svx/PzryTsqeoZN4TZwqeH5pGWjefhLi/1Q=
