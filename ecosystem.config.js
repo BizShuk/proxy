@@ -4,7 +4,7 @@ module.exports = {
         {
             name: "LLM Proxy - Always",
             script: "proxy",
-            namespace: "Service",
+            namespace: "Agent",
             instances: 1,
             optional: true
         }
