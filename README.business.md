@@ -59,7 +59,7 @@ flowchart TD
     Auth -->|invalid| E403["403 Forbidden"]
     Auth -->|valid| Rate{"rateLimitPerIP\n≤ 60/min?"}
     Rate -->|over| E429["429 Too Many Requests"]
-    Rate -->|ok| Read["readRequestBody\n(≤ body-limit-mb)"]
+    Rate -->|ok| Read["readRequestBody\n(≤ body_limit_mb)"]
     Read -->|too large| E413["413 request_too_large"]
     Read --> Meta["解 model / stream"]
     Meta --> Route["Router.Resolve"]
@@ -108,7 +108,7 @@ stateDiagram-v2
 ## 業務約束 (Constraints)
 
 - 准入/品質門檻：
-    - `api-keys` 為空時自動產生一把 `sk-...` (32 bytes hex)，首次啟動即可用 (僅記憶體，不持久化)
+    - `API_KEYS` (`.env`) 為空時自動產生一把 `sk-...` (32 bytes hex)，首次啟動即可用 (僅記憶體，不持久化)
     - 每個 provider 必須有至少一種 auth path (api_key 或 oauth)；缺哪種就在該 family 從 dispatcher 移除
 - 去重/冪等規則：
     - `Router.Resolve` 命中多個 provider 時直接回 `unknown_model` (fail-closed)；避免歧義路由
@@ -116,7 +116,7 @@ stateDiagram-v2
     - `transform.Registry.NewRegistry` 必須完整填滿 `model.ALL_FORMATS × ALL_FORMATS` 矩陣，缺一對就 error
 - 時效/保留政策：
     - OAuth 過期 skew 由 `auth/svc.Resolver` 決定，proxy 端不另外保留
-    - 單請求 body 上限 `body-limit-mb` (預設 200 MB)；SSE frame 上限 1 MiB；上游錯誤 body 日誌上限 64 KiB
+    - 單請求 body 上限 `body_limit_mb` (預設 200 MB)；SSE frame 上限 1 MiB；上游錯誤 body 日誌上限 64 KiB
     - HTTP server `WriteTimeout: 0` (SSE 不可被切斷)；graceful shutdown `SHUTDOWN_TIMEOUT = 10s`
 - 額度/頻率限制：
     - per-IP 60 requests / 1 min (固定窗口 in-memory mutex)；超限回 429

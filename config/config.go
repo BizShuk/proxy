@@ -17,20 +17,19 @@ import (
 
 // APP_NAME is the gosdk config namespace the proxy loads settings from
 // (~/.config/agentSDK). The auth CLI defaults to the "agentsdk" namespace;
-// use auth-dir to point both at the same credential directory.
+// use auth_dir to point both at the same credential directory.
 const APP_NAME = "agentSDK"
 
 // Config is the fully-resolved runtime configuration, loaded through gosdk's
-// layered viper loader (settings.json + settings.local.json, plus APP_*
-// env override for keys whose dot→underscore form is a valid env name —
-// i.e. anything without a `-`, such as server.port). Keys with
-// dashes (auth-dir, body-limit-mb, timeouts.*-ms) are file-only.
-// Field keys mirror the settings.json layout via mapstructure tags.
+// layered viper loader (settings.json + settings.local.json for snake_case
+// settings, .env for SCREAMING_SNAKE credentials such as API_KEYS, a
+// comma-separated list). Field keys mirror the settings.json layout via
+// mapstructure tags.
 type Config struct {
 	Server    ServerConfig           `mapstructure:"server"`
-	AuthDir   string                 `mapstructure:"auth-dir"`
-	APIKeys   []string               `mapstructure:"api-keys"`
-	BodyLimit int                    `mapstructure:"body-limit-mb"`
+	AuthDir   string                 `mapstructure:"auth_dir"`
+	APIKeys   []string               `mapstructure:"api_keys"`
+	BodyLimit int                    `mapstructure:"body_limit_mb"`
 	Timeouts  upstream.TimeoutConfig `mapstructure:"timeouts"`
 	Realtime  RealtimeConfig         `mapstructure:"realtime"`
 	Stats     StatsConfig            `mapstructure:"stats"`
@@ -50,15 +49,15 @@ type StatsConfig struct {
 // the pairwise request/response format matrix.
 type RealtimeConfig struct {
 	Enabled           bool  `mapstructure:"enabled"`
-	MaxConnections    int   `mapstructure:"max-connections"`
-	MaxHandshakeBytes int64 `mapstructure:"max-handshake-bytes"`
+	MaxConnections    int   `mapstructure:"max_connections"`
+	MaxHandshakeBytes int64 `mapstructure:"max_handshake_bytes"`
 }
 
 // LoadConfig runs gosdk's config.Default (which merges settings.json →
 // settings.local.json into the global viper, plus APP_* env override for
 // keys whose flat form is a valid env name) and unmarshals the result
 // into a typed Config. Defaults come from config/example/settings.example.json
-// (the WithDefaultValue layer); api-keys has none, so a first run mints one.
+// (the WithDefaultValue layer); API_KEYS has none, so a first run mints one.
 func LoadConfig() (*Config, error) {
 	gosdkconfig.Default(gosdkconfig.WithAppName(APP_NAME), gosdkconfig.WithDefaultValue(string(example.Settings)))
 
@@ -74,9 +73,8 @@ func LoadConfig() (*Config, error) {
 	return cfg, nil
 }
 
-// ensureAPIKey mirrors the TS behaviour: if no api-keys are configured, mint
-// one so a first run is usable. Persisting it is deferred to the login/serve
-// commands (settings.local.json), keeping this package side-effect free.
+// ensureAPIKey mirrors the TS behaviour: if no API_KEYS are configured, mint
+// an in-memory one so a first run is usable; it is never written back.
 func (c *Config) ensureAPIKey() error {
 	if len(c.APIKeys) > 0 {
 		return nil

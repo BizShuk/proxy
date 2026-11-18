@@ -3,17 +3,17 @@
     "host": "",
     "port": 8317
   },
-  "auth-dir": "",
-  "body-limit-mb": 200,
+  "auth_dir": "",
+  "body_limit_mb": 200,
   "timeouts": {
-    "messages-ms": 120000,
-    "stream-messages-ms": 600000,
-    "count-tokens-ms": 30000
+    "messages_ms": 120000,
+    "stream_messages_ms": 600000,
+    "count_tokens_ms": 30000
   },
   "realtime": {
     "enabled": true,
-    "max-connections": 32,
-    "max-handshake-bytes": 1048576
+    "max_connections": 32,
+    "max_handshake_bytes": 1048576
   },
   "stats": {
     "enabled": true

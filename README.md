@@ -90,7 +90,7 @@
 5. `NewTransformObserver` 註冊 OTel counters：`agentsdk.proxy.transform.warnings`、`agentsdk.proxy.transform.losses`
 6. `RealtimeHandler` 在同一 `/v1` 認證群組提供 WebSocket tunnel、WebRTC unified call 與 ephemeral client secret 三條 OpenAI-compatible 路徑
 
-`核心實體 (Key Entities):` `Server`, `gin.Engine`, `TransformObserver`, `api-keys`, `rateBucket`
+`核心實體 (Key Entities):` `Server`, `gin.Engine`, `TransformObserver`, `API_KEYS`, `rateBucket`
 
 `相關處理器 (Related Handlers):` `handlers/server.go`, `handlers/image_generation.go`, `handlers/middleware.go`, `handlers/observability.go`, `cmd/proxy.go`
 
@@ -102,7 +102,7 @@
 
 `領域流程 (Domain Flow):`
 
-1. `readRequestBody` 包 `MaxBytesReader` 限制 body 大小 (預設 `body-limit-mb=200`)，超過回 `request_too_large` 413
+1. `readRequestBody` 包 `MaxBytesReader` 限制 body 大小 (預設 `body_limit_mb=200`)，超過回 `request_too_large` 413
 2. 解出 `model` / `stream` 後由 `Router.Resolve` → `CredentialResolver.Resolve` → `Catalog.ResolveProfile` 取得 `Profile`
 3. `pair.Request` 翻譯請求；`recordDiagnostics` 把 `Warning` / `SemanticLoss` 餵給 observer
 4. `Profile.NormalizeRequest` 套用 provider-specific 修正；codex 路徑額外呼叫 `logCodexRequestPayload` 印出脫敏後的 metadata (model / stream / store / instructions_bytes / input roles / tool names)
@@ -123,8 +123,8 @@
 `領域流程 (Domain Flow):`
 
 1. `cmd/proxy.go` `ProxyCmd.RunE` 呼叫 `pxconfig.LoadConfig()`：先 `gosdkconfig.Default(WithAppName("agentSDK"))` 合併 `settings.json` + `settings.local.json` (env 變數 `APP_*` 可覆寫無 dash 的鍵)
-2. `setDefaults` 補上 `server.port=8317`、`body-limit-mb=200`、timeout 預設值
-3. `ensureAPIKey`：若 `api-keys` 為空，隨機產生一把 `sk-...` 放進 in-memory config (不寫回磁碟)
+2. `setDefaults` 補上 `server.port=8317`、`body_limit_mb=200`、timeout 預設值
+3. `ensureAPIKey`：若 `.env` 的 `API_KEYS` 為空，隨機產生一把 `sk-...` 放進 in-memory config (不寫回磁碟)
 4. `resolveAuthDir`：空字串時 fallback 到 `<AppDataDir>/auth`，`~` 開頭展開成絕對路徑
 5. `Server.Run(ctx)` 用 `signal.NotifyContext(SIGINT, SIGTERM)` 啟動；`SHUTDOWN_TIMEOUT=10s` graceful shutdown，`WriteTimeout: 0` 避免切斷 SSE 串流
 

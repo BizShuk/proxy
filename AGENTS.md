@@ -15,7 +15,7 @@ proxy/
 │   └── image_mcp.go              # proxy image-mcp; stdio MCP entry
 ├── config/
 │   ├── config.go                 # Config struct + LoadConfig (gosdk viper, APP_NAME="agentSDK")
-│   └── example/                  # settings.example.json (host/port/auth-dir/timeouts/...; 不含 api-keys, 未設時啟動自動產生), `config default` 複製到設定目錄
+│   └── example/                  # settings.example.json (host/port/auth_dir/timeouts/...; 不含 API_KEYS, 未設時啟動自動產生), `config default` 複製到設定目錄
 ├── mcpimage/                     # Codex / Claude Code 共用圖片 MCP server
 │   ├── config.go                 # base URL / port / API key / model / output 設定
 │   ├── client.go                 # POST /v1/images/generations + Base64 解碼
@@ -237,7 +237,5 @@ npm run verify
     - `StreamTransform.Push(ctx, frame)` 與 `Close(ctx)` 都接收 ctx，便於 client 取消時及時釋放
     - `WriteTimeout: 0` 在 `newHTTPServer` 內強制設定；client cancel 走 graceful shutdown
 - 設定覆寫:
-    - dot-form 鍵 (例如 `server.port`、`body-limit-mb` 在 mapstructure 但 `timeouts.messages-ms` 在 mapstructure 但帶 dash) → `settings.json` + `settings.local.json`
-    - 無 dash 的 dot-form 鍵可被 `APP_SERVER_PORT` 等 env 變數覆寫 (gosdk viper 預設)
-    - 帶 dash 的鍵 (例如 `auth-dir`、`body-limit-mb`、`timeouts.*-ms`) 是 file-only
-    - Realtime 限制 (`realtime.max-connections`、`realtime.max-handshake-bytes`) 同樣是 file-only；`realtime.enabled` 可由 `APP_REALTIME_ENABLED` 覆寫
+    - 非機密設定一律 snake_case (例如 `server.port`、`auth_dir`、`body_limit_mb`、`timeouts.messages_ms`、`realtime.max_connections`) → `settings.json` + `settings.local.json`
+    - 機密 (credential) 一律 SCREAMING_SNAKE 放 `.env`: `API_KEYS=sk-a,sk-b` (逗號分隔, 對應 `Config.APIKeys`)
