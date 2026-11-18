@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/bizshuk/agentsdk v0.0.50
 	github.com/bizshuk/auth v0.0.2
-	github.com/bizshuk/gosdk v1.3.28
+	github.com/bizshuk/gosdk v1.8.5
 	github.com/gin-gonic/gin v1.11.0
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.6.0
@@ -37,6 +37,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+	github.com/gocarina/gocsv v0.0.0-20260628180327-50907998929c // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect

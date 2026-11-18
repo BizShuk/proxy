@@ -8,8 +8,8 @@ github.com/bizshuk/agentsdk v0.0.50 h1:7RVMd5/H/YKNiYw8hewLiG6y90HcTSK+xGIkigfsW
 github.com/bizshuk/agentsdk v0.0.50/go.mod h1:rTCHiKFLc1GSGyTm2nndRpwbgMQctFYJQMPOgRxcOwo=
 github.com/bizshuk/auth v0.0.2 h1:tqrV+NitnuLmhdp6wAaV8ZaPOSMy7sooTcJBzxzFHyI=
 github.com/bizshuk/auth v0.0.2/go.mod h1:1H8HFjZvMkKV/bxm4EkliclcAvRQqAocGfoquLrLq8s=
-github.com/bizshuk/gosdk v1.3.28 h1:lS7dprXznSJci7N3F5fKWFajIUpjyKowbt4w4kAOjYs=
-github.com/bizshuk/gosdk v1.3.28/go.mod h1:EqyGgu1mgQ2JGFglktrR+8oaDJZwAKz1ABk4mu4V2eM=
+github.com/bizshuk/gosdk v1.8.5 h1:fRp9MMTeTTK/G0p0L9hotIriUGYIPmLFeVuhfefwAhc=
+github.com/bizshuk/gosdk v1.8.5/go.mod h1:EqyGgu1mgQ2JGFglktrR+8oaDJZwAKz1ABk4mu4V2eM=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
@@ -62,6 +62,8 @@ github.com/go-redis/redismock/v9 v9.0.3 h1:mtHQi2l51lCmXIbTRTqb1EiHYe9tL5Yk5oorl
 github.com/go-redis/redismock/v9 v9.0.3/go.mod h1:F6tJRfnU8R/NZ0E+Gjvoluk14MqMC5ueSZX6vVQypc0=
 github.com/go-viper/mapstructure/v2 v2.5.0 h1:vM5IJoUAy3d7zRSVtIwQgBj7BiWtMPfmPEgAXnvj1Ro=
 github.com/go-viper/mapstructure/v2 v2.5.0/go.mod h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=
+github.com/gocarina/gocsv v0.0.0-20260628180327-50907998929c h1:kC7cxFK96H9RaTVHtnYXSWEGFmO9UBxclb/4/8EPjHA=
+github.com/gocarina/gocsv v0.0.0-20260628180327-50907998929c/go.mod h1:5YoVOkjYAQumqlV356Hj3xeYh4BdZuLE0/nRkf2NKkI=
 github.com/goccy/go-json v0.10.5 h1:Fq85nIqj+gXn/S5ahsiTlK3TmC85qgirsdTP/+DeaC4=
 github.com/goccy/go-json v0.10.5/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
 github.com/goccy/go-yaml v1.19.2 h1:PmFC1S6h8ljIz6gMRBopkjP1TVT7xuwrButHID66PoM=
