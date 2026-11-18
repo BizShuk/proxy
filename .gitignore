@@ -398,6 +398,7 @@ scratch/
 samples/
 sample/
 example/
+!config/example/
 docs/_build/
 docs/build/
 site/
