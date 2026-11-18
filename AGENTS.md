@@ -8,14 +8,14 @@ proxy/
 ├── go.mod / go.sum               # module github.com/bizshuk/proxy (go 1.26.0)
 ├── package.json                  # npm scripts 統一執行 Go build/test/vet/verify
 ├── ecosystem.config.js           # pm2 部署 (namespace: Service)
-├── settings.example.json         # 範例設定 (host/port/auth-dir/api-keys/timeouts/...)
 ├── scripts/                      # *.http 範例 + realtime-webrtc.html browser client
 ├── cmd/
 │   ├── proxy.go                  # cobra ProxyCmd; 預設 --port 8317
 │   ├── options.go                # proxy options/models; Codex + OpenAI/Grok image model catalog
 │   └── image_mcp.go              # proxy image-mcp; stdio MCP entry
 ├── config/
-│   └── config.go                 # Config struct + LoadConfig (gosdk viper, APP_NAME="agentSDK")
+│   ├── config.go                 # Config struct + LoadConfig (gosdk viper, APP_NAME="agentSDK")
+│   └── example/                  # settings.example.json (host/port/auth-dir/api-keys/timeouts/...), `config default` 複製到設定目錄
 ├── mcpimage/                     # Codex / Claude Code 共用圖片 MCP server
 │   ├── config.go                 # base URL / port / API key / model / output 設定
 │   ├── client.go                 # POST /v1/images/generations + Base64 解碼
