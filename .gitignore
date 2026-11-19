@@ -432,3 +432,5 @@ plans/draft.md
 .md-tree-highlight/
 
 bin/
+!.githooks/
+!.githooks/**
