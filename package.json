@@ -7,7 +7,6 @@
     "dev": "go run .",
     "test": "go test ./... -count=1 -timeout=180s",
     "build": "go build -o bin/proxy .",
-    "deploy": "go install .",
     "install": "go install .",
     "lint": "gofmt -l . && go vet ./...",
     "clean": "rm -rf bin",
