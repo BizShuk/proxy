@@ -434,3 +434,4 @@ plans/draft.md
 bin/
 !.githooks/
 !.githooks/**
+pnpm-lock.yaml
