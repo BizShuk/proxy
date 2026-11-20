@@ -77,7 +77,7 @@ $RECYCLE.BIN/
 
 # ── C. Node / JavaScript / TypeScript ────────────────────────────────────────
 
-node_modules/
+**/node_modules/
 jspm_packages/
 .npm/
 .yarn/
@@ -434,4 +434,3 @@ plans/draft.md
 bin/
 !.githooks/
 !.githooks/**
-pnpm-lock.yaml
