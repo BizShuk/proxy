@@ -9,7 +9,7 @@
 # 執行在背景, push 不會變慢; 同一個 repo 的多支 npm 腳本以 mkdir lock 依序執行,
 # 所以 install 一定在 deploy 之前跑完 (pre-push.d 的檔名順序)。
 # 跑的是`工作目錄`, 不是被 push 的 commit: 這是把自己剛改的東西裝回自己的機器。
-# log 在 ~/.config/inf/logs/npm-<repo>.log。永遠 exit 0, 不擋 push。
+# log 在 ~/.config/inf/logs/npm-<repo>.log, 結束時以 scripts/notify.sh 通知。永遠 exit 0, 不擋 push。
 
 set -uo pipefail
 
@@ -36,7 +36,13 @@ command -v jq >/dev/null 2>&1 || { note "沒有 jq, 略過 pnpm run ${script}"; 
 jq -e --arg s "$script" '.scripts[$s] // empty' "$PACKAGE_FILE" >/dev/null || exit 0
 command -v pnpm >/dev/null 2>&1 || { note "沒有 pnpm, 略過 pnpm run ${script}"; exit 0; }
 
-repo="$(basename "$(git rev-parse --show-toplevel)")"
+repo_dir="$(git rev-parse --show-toplevel)"
+repo="$(basename "$repo_dir")"
+notify="$(dirname "$0")/notify.sh"
+case "$script" in
+install) done_msg="Installed locally" ;;
+*) done_msg="pnpm run ${script} done" ;;
+esac
 log_dir="${HOME}/.config/inf/logs"
 lock="${HOME}/.config/inf/npm-${repo}.lock"
 log="${log_dir}/npm-${repo}.log"
@@ -48,8 +54,10 @@ mkdir -p "$log_dir"
 	echo "=== $(date '+%F %T') pnpm run ${script} ==="
 	if pnpm run "$script"; then
 		echo "=== ok: pnpm run ${script} ==="
+		"$notify" "$repo_dir" "$done_msg"
 	else
 		echo "=== FAILED ($?): pnpm run ${script} ==="
+		"$notify" "$repo_dir" "⚠️ pnpm run ${script} failed, log: ${log/#"$HOME"/\~}"
 	fi
 ) </dev/null >>"$log" 2>&1 &
 disown
